@@ -15,6 +15,7 @@ export interface WarrantData {
   
   // Real-time Market Data
   price: number; // Current Market Price (Last)
+  strikePrice: number; // 履約價
   
   // Optional fields (Python script might not provide these explicitly)
   change?: number;

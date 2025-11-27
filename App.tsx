@@ -16,7 +16,7 @@ const App: React.FC = () => {
   const [currentTarget, setCurrentTarget] = useState(''); // 當前顯示的標的
   const [isSearching, setIsSearching] = useState(false);
   const [resultTime, setResultTime] = useState<Date | null>(null);
-
+  
   // Sorting State
   const [sortConfig, setSortConfig] = useState<{
     key: 'volume' | 'effectiveLeverage' | 'dailyThetaCostPercent' | 'daysToMaturity';
@@ -41,14 +41,10 @@ const App: React.FC = () => {
     // 訂閱特定標的的搜尋結果
     const unsubscribe = subscribeToSearchResult(currentTarget, (data, time) => {
       // 只有當 data 有內容時，才視為搜尋完成
-      // 如果文件存在但 results 為空，可能是後端正在寫入，保持 loading 狀態
       if (data.length > 0) {
         setWarrants(data);
         setResultTime(time || new Date());
         setIsSearching(false);
-      } else {
-         // 若監聽到空陣列，可能是剛初始化，或真的沒結果
-         // 這裡我們先不把 isSearching 設為 false，讓使用者感覺還在找，直到有資料或超時
       }
     });
 
@@ -71,7 +67,6 @@ const App: React.FC = () => {
     // 2. 發送指令給 Python
     try {
       await sendSearchCommand(targetCode);
-      // 指令發送成功後，useEffect 會負責監聽結果更新
     } catch (error) {
       console.error("Failed to send command", error);
       setIsSearching(false);
@@ -133,11 +128,11 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <h1 className="text-xl font-bold tracking-tight text-white">權證狙擊手</h1>
                   <span className="bg-yellow-900/50 text-yellow-300 text-[10px] px-1.5 py-0.5 rounded border border-yellow-800 font-mono flex items-center gap-1">
-                    <Zap size={8} /> V23.0
+                    <Zap size={8} /> V39.0
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                   <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Server-Side Scan</p>
+                   <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Data Corrected</p>
                    
                    <button 
                      onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}

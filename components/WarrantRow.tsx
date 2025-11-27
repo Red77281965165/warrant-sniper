@@ -87,7 +87,9 @@ const WarrantRow: React.FC<WarrantRowProps> = ({ data, onClick, isCall, isFavori
         </div>
         <div className="flex items-center gap-2" title="Theta Cost">
            <span className="text-xs text-slate-500">利息</span>
-           <span className="text-sm text-yellow-500/80 font-mono">{data.dailyThetaCostPercent.toFixed(2)}%</span>
+           <span className={`text-sm font-mono ${data.dailyThetaCostPercent === 0 ? 'text-slate-600' : 'text-yellow-500/80'}`}>
+             {data.dailyThetaCostPercent === 0 ? '-' : `${data.dailyThetaCostPercent.toFixed(2)}%`}
+           </span>
         </div>
       </div>
       

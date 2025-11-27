@@ -2,7 +2,7 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { FIREBASE_CONFIG } from '../constants';
-import { WarrantData } from '../types';
+import { WarrantData, OrderBookEntry } from '../types';
 
 let db: any = null;
 
@@ -44,8 +44,9 @@ export const subscribeToSearchResult = (
 
   // 嚴格遵守後端 Python 規格:
   // Collection: "search_results"
-  // Document ID: stockCode (使用者輸入的代號)
-  const docRef = doc(db, "search_results", stockCode);
+  // Document ID: 經過 safe_id 處理 (移除 / 與 . )
+  const safeId = stockCode.replace(/\//g, "").replace(/\./g, "");
+  const docRef = doc(db, "search_results", safeId);
 
   const unsubscribe = onSnapshot(docRef, (docSnap) => {
     if (docSnap.exists()) {
@@ -55,7 +56,15 @@ export const subscribeToSearchResult = (
       // 將 Python 回傳的精簡 JSON 轉換為前端 WarrantData 格式
       const warrants: WarrantData[] = rawResults.map((item: any) => {
         // 簡單判斷認購/認售 (後端回傳名稱如 "台積電元大...購01")
-        const isCall = item.name.includes('購'); 
+        const isCall = item.name.includes('購');
+        
+        // 處理五檔報價 (Python V39.0 回傳的是陣列)
+        const bids: OrderBookEntry[] = Array.isArray(item.bids) ? item.bids : [];
+        const asks: OrderBookEntry[] = Array.isArray(item.asks) ? item.asks : [];
+
+        // 提取最佳買賣價 (第一檔)
+        const bestBid = bids.length > 0 ? bids[0] : { price: 0, volume: 0 };
+        const bestAsk = asks.length > 0 ? asks[0] : { price: 0, volume: 0 };
         
         return {
           id: item.id,
@@ -63,11 +72,12 @@ export const subscribeToSearchResult = (
           name: item.name,
           underlyingSymbol: stockCode,
           underlyingName: stockCode, // 後端未回傳中文股名，暫用代號顯示
-          broker: "N/A", // 後端未回傳券商
+          broker: item.broker || "N/A", // Python V39.0 有回傳 broker
           type: isCall ? 'CALL' : 'PUT',
           
           // 核心數據
           price: Number(item.price) || 0,
+          strikePrice: Number(item.strike) || 0,
           volume: Number(item.volume) || 0,
           
           // 欄位映射 (Python key -> Frontend key)
@@ -75,20 +85,21 @@ export const subscribeToSearchResult = (
           spreadPercent: Number(item.spread) || 0,
           daysToMaturity: Number(item.days) || 0,
           
-          // 衍生數據 (後端未算，給預設值)
-          dailyThetaCostPercent: 0, 
+          // Python V39.0 補上了 theta (雖然邏輯預設 0.0)
+          dailyThetaCostPercent: Number(item.theta) || 0, 
+          
           change: 0,
           changePercent: 0,
 
-          // 模擬最佳買賣價 (前端顯示用，因後端只給成交價)
-          bestBidPrice: Number(item.price),
-          bestBidVol: 0,
-          bestAskPrice: Number(item.price),
-          bestAskVol: 0,
+          // 使用從 bids/asks 提取的數據
+          bestBidPrice: Number(bestBid.price) || 0,
+          bestBidVol: Number(bestBid.volume) || 0,
+          bestAskPrice: Number(bestAsk.price) || 0,
+          bestAskVol: Number(bestAsk.volume) || 0,
 
-          // 深度資訊 (後端無提供，給空陣列)
-          bids: [], 
-          asks: []
+          // 深度資訊
+          bids: bids, 
+          asks: asks
         };
       });
 

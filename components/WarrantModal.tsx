@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { X, AlertTriangle, TrendingUp, DollarSign, Clock, Activity, CalendarDays, Star } from 'lucide-react';
+import { X, AlertTriangle, TrendingUp, DollarSign, Clock, Activity, CalendarDays, Star, Target } from 'lucide-react';
 import { WarrantData } from '../types';
 import OrderBook from './OrderBook';
 
@@ -99,8 +99,8 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
                        <p className="text-xs text-slate-400 mb-1 flex items-center gap-1">
                           每日利息(Theta) <Clock size={12} />
                        </p>
-                      <p className="text-lg font-mono font-bold text-yellow-400">
-                        {warrant.dailyThetaCostPercent.toFixed(2)}%
+                      <p className={`text-lg font-mono font-bold ${warrant.dailyThetaCostPercent === 0 ? 'text-slate-500' : 'text-yellow-400'}`}>
+                        {warrant.dailyThetaCostPercent === 0 ? '-' : `${warrant.dailyThetaCostPercent.toFixed(2)}%`}
                       </p>
                     </div>
                     <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
@@ -109,6 +109,14 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
                        </p>
                       <p className={`text-lg font-mono font-bold ${warrant.daysToMaturity < 60 ? 'text-red-400' : 'text-blue-300'}`}>
                         {warrant.daysToMaturity} <span className="text-xs text-slate-500 font-normal">天</span>
+                      </p>
+                    </div>
+                    <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 col-span-2">
+                       <p className="text-xs text-slate-400 mb-1 flex items-center gap-1">
+                          履約價 (Strike) <Target size={12} />
+                       </p>
+                      <p className="text-lg font-mono font-bold text-slate-200">
+                        {warrant.strikePrice > 0 ? warrant.strikePrice.toFixed(2) : '-'}
                       </p>
                     </div>
                   </div>
