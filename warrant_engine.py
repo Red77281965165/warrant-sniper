@@ -37,14 +37,14 @@ STRATEGY_CONFIG = {
     "MAX_PRICE": 50.0          # 最高價
 }
 
-# 已知券商列表 (用來從權證名字中提取券商)
+# 已知券商列表
 KNOWN_BROKERS = [
     "元大", "凱基", "統一", "永豐", "富邦", "群益", "國泰", "兆豐", 
     "華南", "玉山", "元富", "康和", "第一", "麥證", "法興", "匯豐", 
     "國票", "永昌", "亞東"
 ]
 
-print("⚡ 正在啟動權證戰情室 (v2025.7 券商名稱修復版)...")
+print("⚡ 正在啟動權證戰情室 (v2025.9 委買張數修復版)...")
 
 # ==========================================
 # 1. 初始化與 CSV 資料載入
@@ -214,7 +214,7 @@ def process_search(query_text):
         if m_contract:
             s = api.snapshots([m_contract])
             if s: 
-                mother_price = s[0].close
+                mother_price = float(s[0].close)
                 print(f"   📊 標的價格: {mother_price}")
     except Exception as e:
         print(f"   ❌ 標的報價抓取錯誤: {e}")
@@ -254,14 +254,30 @@ def process_search(query_text):
             if c.code not in CACHE_SPECS: continue
             
             snap = snap_map[c.code]
-            market_price = snap.close
-            if market_price == 0 and snap.buy_price > 0: market_price = snap.buy_price
-            if market_price == 0: continue
             
-            bid_price = snap.buy_price if snap.buy_price > 0 else market_price
-            volume = snap.total_volume
+            # --- 【報價與張數抓取】 ---
+            best_bid = float(snap.buy_price)   # 最佳委買價
+            best_ask = float(snap.sell_price)  # 最佳委賣價
+            last_price = float(snap.close)     # 最新成交價
             
-            if volume <= STRATEGY_CONFIG["MIN_VOLUME"]: continue
+            # 新增：抓取最佳五檔的第一檔張數 (Best Bid/Ask Volume)
+            best_bid_vol = int(snap.buy_volume) # 最佳委買量
+            best_ask_vol = int(snap.sell_volume) # 最佳委賣量
+            
+            # 定義「市價 (Market Price)」邏輯： Ask > Last > Bid
+            if best_ask > 0:
+                market_price = best_ask
+            elif last_price > 0:
+                market_price = last_price
+            elif best_bid > 0:
+                market_price = best_bid
+            else:
+                continue 
+            
+            volume = snap.total_volume # 這是當日總成交量
+            # --- ---------------- ---
+            
+            if volume < STRATEGY_CONFIG["MIN_VOLUME"]: continue
             if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
 
             specs = CACHE_SPECS[c.code]
@@ -285,6 +301,7 @@ def process_search(query_text):
                     if days_left > 0:
                         T = days_left / 365.0
                         r_rate = 0.015 
+                        
                         opt_price_per_share = market_price / multiplier if multiplier > 0 else market_price
                         
                         iv = FinancialEngine.implied_volatility(opt_price_per_share, mother_price, strike, T, r_rate, w_type)
@@ -297,32 +314,42 @@ def process_search(query_text):
                                 continue
 
                             theta_cost_dollar = (theta_annual / 365.0) * multiplier
-                            if bid_price > 0:
-                                theta_pct = (theta_cost_dollar / bid_price) * 100
+                            
+                            # --- 【Theta 計算修改】 ---
+                            # 使用最佳委買 (Best Bid) 計算每日利息佔比
+                            # 邏輯：如果你持有它，每天會依據「變現價格(Bid)」損失多少比例
+                            calc_base = best_bid if best_bid > 0 else market_price
+                            
+                            if calc_base > 0:
+                                theta_pct = (theta_cost_dollar / calc_base) * 100
                             
                             if abs(theta_pct) > STRATEGY_CONFIG["MAX_THETA_PCT"]:
                                 continue
                             
                             iv_display = round(iv * 100, 1)
                             
-                            # 【修正】券商名稱提取
                             broker_name = "其他"
                             for b in KNOWN_BROKERS:
                                 if b in c.name:
                                     broker_name = b
                                     break
                             
+                            # --- 【回傳資料區】 ---
                             valid_results.append({
                                 "id": c.code,
                                 "name": c.name,
                                 "price": round(float(market_price), 2),
-                                "volume": int(volume),
+                                "bid": round(float(best_bid), 2),
+                                "ask": round(float(best_ask), 2),
+                                "bid_vol": int(best_bid_vol), # 新增：委買張數
+                                "ask_vol": int(best_ask_vol), # 新增：委賣張數
+                                "volume": int(volume),        # 這是總成交量
                                 "lev": round(effective_leverage, 2),
                                 "theta_pct": round(theta_pct, 2),
                                 "days": days_left,
                                 "strike": strike,
                                 "iv": iv_display,
-                                "broker": broker_name, # 回傳正確的券商名
+                                "broker": broker_name,
                             })
                 except Exception:
                     pass

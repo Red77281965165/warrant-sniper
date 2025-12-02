@@ -76,7 +76,7 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
                  <div className="bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm relative overflow-hidden">
                     <div className="flex items-center gap-2 mb-2 text-slate-400">
                        <Zap size={14} className="text-yellow-500" />
-                       <span className="text-xs font-bold">實質槓桿</span>
+                       <span className="text-xs font-bold">槓桿</span>
                     </div>
                     <p className="text-2xl font-mono font-bold text-white">
                        {warrant.effectiveLeverage.toFixed(2)}<span className="text-sm text-slate-600 ml-1">x</span>
