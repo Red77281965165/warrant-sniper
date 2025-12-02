@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { X, AlertTriangle, TrendingUp, DollarSign, Clock, Activity, CalendarDays, Star, Target } from 'lucide-react';
+import { X, Star, AlertTriangle, Target, Activity, Calendar, BarChart2, Clock, Zap, TrendingUp } from 'lucide-react';
 import { WarrantData } from '../types';
 import OrderBook from './OrderBook';
 
@@ -14,128 +13,122 @@ interface WarrantModalProps {
 const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorite, onToggleFavorite }) => {
   if (!warrant) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-        onClick={onClose}
-      />
+  const isCall = warrant.type === 'CALL';
+  const themeText = isCall ? 'text-red-500' : 'text-emerald-500';
+  const themeBorder = isCall ? 'border-red-600' : 'border-emerald-600';
+  const themeShadow = isCall ? 'shadow-red-900/20' : 'shadow-emerald-900/20';
+  
+  // Format helpers
+  const fmt = (num: number) => num.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
-      {/* Modal Content */}
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in duration-200">
+      <div className="absolute inset-0 bg-black/90 backdrop-blur-sm" onClick={onClose} />
+      
+      {/* Modal Frame */}
+      <div className={`relative w-full max-w-lg bg-[#0e0e0e] border-t-2 sm:border ${themeBorder} flex flex-col max-h-[90vh] sm:rounded-lg overflow-hidden shadow-2xl ${themeShadow}`}>
         
         {/* Header */}
-        <div className={`flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900`}>
-          <div className="flex items-center gap-3">
-             <span className={`px-2 py-1 text-xs font-bold rounded ${warrant.type === 'CALL' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
-                {warrant.type === 'CALL' ? '認購 (CALL)' : '認售 (PUT)'}
-             </span>
-             <div>
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  {warrant.name}
-                  <span className="text-sm text-slate-400 font-normal">({warrant.symbol})</span>
-                </h2>
-                <p className="text-sm text-slate-400">
-                  標的: <span className="text-slate-200">{warrant.underlyingName} ({warrant.underlyingSymbol})</span>
-                  <span className="mx-2">•</span>
-                  券商: {warrant.broker}
-                </p>
-             </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            {/* Favorite Button in Modal */}
-            <button 
-               onClick={onToggleFavorite}
-               className={`p-2 rounded-full transition-colors ${isFavorite ? 'bg-yellow-500/10 text-yellow-500' : 'text-slate-500 hover:text-yellow-500 hover:bg-slate-800'}`}
-               title={isFavorite ? "移除自選" : "加入自選"}
-            >
-               <Star size={20} className={isFavorite ? "fill-yellow-500" : ""} />
-            </button>
-            <button 
-              onClick={onClose}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors"
-            >
-              <X size={24} />
-            </button>
-          </div>
+        <div className="relative px-6 py-5 bg-[#141414] border-b border-slate-800 flex justify-between items-start">
+           <div>
+              <div className="flex items-center gap-3">
+                 <h2 className="text-3xl font-black text-white font-mono tracking-wide">{warrant.symbol}</h2>
+                 <span className={`text-xs font-bold px-2 py-0.5 border rounded ${isCall ? 'border-red-500 text-red-500 bg-red-950/30' : 'border-emerald-500 text-emerald-500 bg-emerald-950/30'}`}>
+                    {isCall ? '認購' : '認售'}
+                 </span>
+              </div>
+              <p className="text-slate-400 text-sm mt-1 font-medium tracking-wide">
+                 {warrant.name} <span className="text-slate-600 mx-2">|</span> {warrant.underlyingName}
+              </p>
+           </div>
+           <div className="flex gap-2">
+              <button onClick={onToggleFavorite} className="p-2 bg-slate-900 rounded hover:bg-slate-800 transition-colors border border-slate-800">
+                 <Star size={20} className={isFavorite ? "fill-yellow-400 text-yellow-400" : "text-slate-500"} />
+              </button>
+              <button onClick={onClose} className="p-2 bg-slate-900 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors border border-slate-800">
+                 <X size={20} />
+              </button>
+           </div>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          
-          {/* Main Visuals: OrderBook + Metrics */}
-          <div className="flex flex-col md:flex-row gap-6">
-            
-            {/* Left: Order Book */}
-            <div className="w-full md:w-1/2">
-               <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-                 <DollarSign size={16} /> 五檔報價
-               </h3>
-               <OrderBook bids={warrant.bids} asks={warrant.asks} type={warrant.type} />
-            </div>
-
-            {/* Right: Metrics & Warnings */}
-            <div className="w-full md:w-1/2 flex flex-col gap-5">
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto bg-tech-pattern pb-6">
+           <div className="p-6 space-y-6">
               
-              {/* Key Metrics - Moved from top to side column */}
-              <div>
-                  <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-                     <Activity size={16} /> 關鍵數據
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
-                      <p className="text-xs text-slate-400 mb-1">成交量</p>
-                      <p className="text-lg font-mono font-bold text-white">{warrant.volume.toLocaleString()}<span className="text-xs ml-1 text-slate-500">張</span></p>
+              {/* Main Price Row */}
+              <div className="flex items-end justify-between pb-4 border-b border-slate-800/50">
+                 <div>
+                    <p className="text-xs text-slate-500 font-bold mb-1">即時成交價</p>
+                    <div className="flex items-baseline gap-2">
+                       <span className={`text-5xl font-mono font-bold ${themeText} drop-shadow-md`}>{warrant.price.toFixed(2)}</span>
+                       <span className="text-slate-500 text-sm">TWD</span>
                     </div>
-                    <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
-                      <p className="text-xs text-slate-400 mb-1">實質槓桿</p>
-                      <p className={`text-lg font-mono font-bold ${warrant.type === 'CALL' ? 'text-red-400' : 'text-green-400'}`}>
-                        {warrant.effectiveLeverage.toFixed(2)}x
-                      </p>
-                    </div>
-                    <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
-                       <p className="text-xs text-slate-400 mb-1 flex items-center gap-1">
-                          每日利息(Theta) <Clock size={12} />
-                       </p>
-                      <p className={`text-lg font-mono font-bold ${warrant.dailyThetaCostPercent === 0 ? 'text-slate-500' : 'text-yellow-400'}`}>
-                        {warrant.dailyThetaCostPercent === 0 ? '-' : `${warrant.dailyThetaCostPercent.toFixed(2)}%`}
-                      </p>
-                    </div>
-                    <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
-                       <p className="text-xs text-slate-400 mb-1 flex items-center gap-1">
-                          剩餘天數 <CalendarDays size={12} />
-                       </p>
-                      <p className={`text-lg font-mono font-bold ${warrant.daysToMaturity < 60 ? 'text-red-400' : 'text-blue-300'}`}>
-                        {warrant.daysToMaturity} <span className="text-xs text-slate-500 font-normal">天</span>
-                      </p>
-                    </div>
-                    <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 col-span-2">
-                       <p className="text-xs text-slate-400 mb-1 flex items-center gap-1">
-                          履約價 (Strike) <Target size={12} />
-                       </p>
-                      <p className="text-lg font-mono font-bold text-slate-200">
-                        {warrant.strikePrice > 0 ? warrant.strikePrice.toFixed(2) : '-'}
-                      </p>
-                    </div>
-                  </div>
-              </div>
-
-              {/* Warnings */}
-              <div className="bg-yellow-900/10 border border-yellow-700/30 rounded p-3">
-                 <div className="flex items-start gap-2">
-                    <AlertTriangle size={16} className="text-yellow-500 mt-0.5 shrink-0" />
-                    <p className="text-xs text-yellow-200/80 leading-relaxed">
-                       注意：權證為高槓桿商品，每日利息成本會隨持有時間侵蝕價值。請嚴格遵守停損紀律。
-                    </p>
+                 </div>
+                 <div className="text-right">
+                     <p className="text-xs text-slate-500 font-bold mb-1">當日成交量</p>
+                     <div className="text-2xl font-mono font-bold text-white">{warrant.volume.toLocaleString()}</div>
                  </div>
               </div>
 
-            </div>
-          </div>
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                 {/* Leverage */}
+                 <div className="bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm relative overflow-hidden">
+                    <div className="flex items-center gap-2 mb-2 text-slate-400">
+                       <Zap size={14} className="text-yellow-500" />
+                       <span className="text-xs font-bold">實質槓桿</span>
+                    </div>
+                    <p className="text-2xl font-mono font-bold text-white">
+                       {warrant.effectiveLeverage.toFixed(2)}<span className="text-sm text-slate-600 ml-1">x</span>
+                    </p>
+                 </div>
 
+                 {/* Theta / Daily Interest */}
+                 <div className="bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm">
+                    <div className="flex items-center gap-2 mb-2 text-slate-400">
+                       <Clock size={14} className={Math.abs(warrant.thetaPercent) > 1.5 ? 'text-red-500' : 'text-slate-500'} />
+                       <span className="text-xs font-bold">每日利息 (Theta)</span>
+                    </div>
+                    <p className={`text-2xl font-mono font-bold ${Math.abs(warrant.thetaPercent) > 2 ? 'text-red-400' : 'text-slate-300'}`}>
+                       {warrant.thetaPercent}%
+                    </p>
+                 </div>
+
+                 {/* Days Left */}
+                 <div className="col-span-2 bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm">
+                    <div className="flex items-center gap-2 mb-2 text-slate-400">
+                       <Calendar size={14} />
+                       <span className="text-xs font-bold">剩餘天數</span>
+                    </div>
+                    <p className="text-xl font-mono font-bold text-slate-200">{warrant.daysToMaturity} <span className="text-xs text-slate-500">天</span></p>
+                 </div>
+              </div>
+
+              {/* Risk Warning */}
+              {Math.abs(warrant.thetaPercent) > 1.5 && (
+                <div className="flex items-start gap-3 p-3 bg-red-950/10 border border-red-900/30 rounded">
+                   <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
+                   <p className="text-xs text-red-200/70 leading-relaxed">
+                      <strong className="text-red-400 block mb-0.5">高時間價值風險</strong>
+                      此權證時間價值流失較快，建議進行短線操作，不宜久留。
+                   </p>
+                </div>
+              )}
+
+              {/* Order Book */}
+              <div className="pt-2">
+                 <div className="flex items-center justify-between mb-3 border-l-2 border-red-500 pl-3">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                       最佳委買&委賣
+                    </h3>
+                    <span className="text-[10px] text-slate-500 font-mono">LIVE DATA</span>
+                 </div>
+                 <OrderBook bids={warrant.bids} asks={warrant.asks} type={warrant.type} />
+              </div>
+
+           </div>
         </div>
+
       </div>
     </div>
   );

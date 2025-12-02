@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { WarrantData } from '../types';
-import { ChevronRight, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 
 interface WarrantRowProps {
   data: WarrantData;
@@ -12,96 +11,85 @@ interface WarrantRowProps {
 }
 
 const WarrantRow: React.FC<WarrantRowProps> = ({ data, onClick, isCall, isFavorite, onToggleFavorite }) => {
-  const themeColorClass = isCall ? 'text-red-400' : 'text-green-400';
-  const bgColorHover = isCall ? 'hover:bg-red-900/10' : 'hover:bg-green-900/10';
-  const barColor = isCall ? 'bg-red-500' : 'bg-green-500';
+  
+  // Theme logic
+  const themeColor = isCall ? 'text-red-500' : 'text-emerald-500';
+  const borderColor = isCall ? 'border-red-900/30' : 'border-emerald-900/30';
+  const glowHover = isCall ? 'hover:shadow-[0_0_20px_rgba(220,38,38,0.1)] hover:border-red-500/40' : 'hover:shadow-[0_0_20px_rgba(16,185,129,0.1)] hover:border-emerald-500/40';
+  const bgBadge = isCall ? 'bg-red-950/40 text-red-400 border-red-900/50' : 'bg-emerald-950/40 text-emerald-400 border-emerald-900/50';
 
   return (
     <div 
       onClick={() => onClick(data)}
-      className={`group relative flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900 cursor-pointer transition-all duration-200 ${bgColorHover}`}
+      className={`relative group bg-[#121212] border ${borderColor} rounded-sm transition-all duration-200 cursor-pointer overflow-hidden ${glowHover}`}
     >
-      {/* Favorite Button */}
-      <div 
-        onClick={onToggleFavorite}
-        className="mr-3 p-2 -ml-2 rounded-full hover:bg-slate-800 text-slate-600 hover:text-yellow-500 cursor-pointer transition-colors z-10"
-      >
-        <Star 
-          size={18} 
-          className={isFavorite ? "fill-yellow-500 text-yellow-500" : "fill-transparent"} 
-        />
-      </div>
+      {/* Background Decor */}
+      <div className="absolute right-0 top-0 w-24 h-full bg-gradient-to-l from-[#1a1a1a] to-transparent opacity-50 pointer-events-none" />
 
-      {/* Left: Info */}
-      <div className="flex flex-col w-1/4 min-w-[110px]">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-white font-bold tracking-wide">{data.underlyingName}</span>
-          <span className="text-xs text-slate-500 font-mono">{data.underlyingSymbol}</span>
+      <div className="p-3.5 relative z-10 flex items-center gap-3">
+        
+        {/* Favorite Button */}
+        <button 
+           onClick={onToggleFavorite}
+           className="text-slate-700 hover:text-yellow-400 transition-colors p-1 self-start mt-0.5"
+        >
+           <Star size={18} className={isFavorite ? "fill-yellow-400 text-yellow-400" : ""} />
+        </button>
+
+        {/* Main Info */}
+        <div className="flex-1 min-w-0">
+           <div className="flex items-baseline gap-2 mb-1.5">
+              <span className="font-mono text-lg font-bold text-white tracking-wide leading-none">{data.symbol}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium whitespace-nowrap ${bgBadge}`}>
+                 {data.name}
+              </span>
+           </div>
+           
+           {/* Price & Broker Info Row */}
+           <div className="flex items-end gap-3">
+               <div className="flex items-baseline gap-1.5">
+                  <div className={`text-2xl font-mono font-bold leading-none ${themeColor}`}>
+                      {data.price.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-medium">現價</div>
+               </div>
+
+               <div className="flex items-center gap-2 text-xs text-slate-500 pb-0.5 border-l border-slate-800 pl-3">
+                  <span>{data.broker}</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-700"></span>
+                  <span className="font-mono">{data.type === 'CALL' ? '認購' : '認售'}</span>
+               </div>
+           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`px-1.5 py-0.5 rounded-sm bg-slate-800 text-slate-300 border border-slate-700`}>
-             {data.symbol}
-          </span>
-          <span className="text-slate-400">{data.broker}</span>
-        </div>
-      </div>
 
-      {/* Center: Bid / Ask Visuals - The most obvious part */}
-      <div className="flex-1 px-4 flex items-center justify-center gap-6">
-         {/* Bid */}
-         <div className="flex flex-col items-end w-1/3 md:w-1/4">
-            <span className={`text-xl md:text-2xl font-bold font-mono ${themeColorClass}`}>
-               {data.bestBidPrice.toFixed(2)}
-            </span>
-            <div className="flex items-center gap-1 text-xs text-slate-500">
-               <span>量 {data.bestBidVol}</span>
-            </div>
-         </div>
+        {/* Metrics Grid - Right Side */}
+        <div className="flex gap-3 pl-3 border-l border-slate-800">
+           
+           {/* Leverage */}
+           <div className="flex flex-col items-center min-w-[40px]">
+              <span className={`font-mono font-bold text-sm ${data.effectiveLeverage > 5 ? 'text-yellow-500' : 'text-slate-300'}`}>
+                 {data.effectiveLeverage}x
+              </span>
+              <span className="text-[9px] text-slate-600 scale-90">槓桿</span>
+           </div>
 
-         {/* Divider / Spread Info */}
-         <div className="flex flex-col items-center justify-center w-[60px]">
-            <span className="text-[10px] text-slate-500 uppercase">Spread</span>
-            <span className={`text-xs font-mono ${data.spreadPercent > 2 ? 'text-orange-500' : 'text-slate-400'}`}>
-               {data.spreadPercent.toFixed(1)}%
-            </span>
-         </div>
-
-         {/* Ask */}
-         <div className="flex flex-col items-start w-1/3 md:w-1/4">
-            <span className={`text-xl md:text-2xl font-bold font-mono ${themeColorClass}`}>
-               {data.bestAskPrice.toFixed(2)}
-            </span>
-             <div className="flex items-center gap-1 text-xs text-slate-500">
-               <span>量 {data.bestAskVol}</span>
-            </div>
-         </div>
-      </div>
-
-      {/* Right: Technicals (Hidden on small mobile) */}
-      <div className="hidden sm:flex flex-col items-end w-1/5 min-w-[100px] text-right gap-1">
-        <div className="flex items-center gap-2" title="Days to Maturity">
-           <span className="text-xs text-slate-500">天期</span>
-           <span className={`text-sm font-mono ${data.daysToMaturity < 60 ? 'text-red-400' : 'text-slate-200'}`}>
-             {data.daysToMaturity}天
-           </span>
-        </div>
-        <div className="flex items-center gap-2" title="Theta Cost">
-           <span className="text-xs text-slate-500">利息</span>
-           <span className={`text-sm font-mono ${data.dailyThetaCostPercent === 0 ? 'text-slate-600' : 'text-yellow-500/80'}`}>
-             {data.dailyThetaCostPercent === 0 ? '-' : `${data.dailyThetaCostPercent.toFixed(2)}%`}
-           </span>
+           {/* Theta / Daily Interest */}
+           <div className="flex flex-col items-center min-w-[40px]">
+              <span className={`font-mono font-bold text-sm ${Math.abs(data.thetaPercent) > 1.5 ? 'text-red-400' : 'text-slate-400'}`}>
+                 {data.thetaPercent}
+              </span>
+              <span className="text-[9px] text-slate-600 scale-90 whitespace-nowrap">每日利息</span>
+           </div>
         </div>
       </div>
-      
-      {/* Visual Bar for Volume (Subtle background hint) */}
-      <div className="absolute bottom-0 left-0 h-[2px] w-full bg-slate-800">
+
+      {/* Volume Bar Footer */}
+      <div className="h-0.5 w-full bg-[#1a1a1a] relative">
          <div 
-           className={`h-full opacity-50 ${barColor}`} 
-           style={{ width: `${Math.min(data.volume / 2000, 100)}%` }} // Normalized visual to 2000 lots
+           className={`h-full ${isCall ? 'bg-red-600' : 'bg-emerald-600'} opacity-60`} 
+           style={{ width: `${Math.min((data.volume / 1000) * 100, 100)}%` }}
          />
       </div>
-
-      <ChevronRight className="ml-2 text-slate-700 group-hover:text-slate-400 transition-colors" size={20} />
     </div>
   );
 };

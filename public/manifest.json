@@ -1,6 +1,7 @@
+
 {
-  "name": "權證戰情室",
-  "short_name": "權證戰情室",
+  "name": "權證狙擊手",
+  "short_name": "權證狙擊手",
   "description": "A battle-ready, real-time warrant monitoring dashboard with professional dark mode interface.",
   "start_url": "/",
   "display": "standalone",

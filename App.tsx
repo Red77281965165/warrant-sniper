@@ -1,29 +1,26 @@
-
-import React, { useState, useEffect } from 'react';
-import { Search, X, Database, Star, Zap, TrendingUp as TrendingUpIcon, TrendingDown as TrendingDownIcon, Target, Loader2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle } from 'lucide-react';
 import WarrantRow from './components/WarrantRow';
 import WarrantModal from './components/WarrantModal';
 import { WarrantData } from './types';
-import { sendSearchCommand, subscribeToSearchResult } from './services/firebaseService';
+import { sendSearchCommand, subscribeToSearchCommand } from './services/firebaseService';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'CALL' | 'PUT'>('CALL');
   const [warrants, setWarrants] = useState<WarrantData[]>([]);
   const [selectedWarrant, setSelectedWarrant] = useState<WarrantData | null>(null);
   
-  // 搜尋狀態
-  const [searchQuery, setSearchQuery] = useState(''); // 輸入框內容
-  const [currentTarget, setCurrentTarget] = useState(''); // 當前顯示的標的
+  const [searchQuery, setSearchQuery] = useState(''); 
+  const [currentTarget, setCurrentTarget] = useState(''); 
   const [isSearching, setIsSearching] = useState(false);
-  const [resultTime, setResultTime] = useState<Date | null>(null);
   
-  // Sorting State
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
   const [sortConfig, setSortConfig] = useState<{
-    key: 'volume' | 'effectiveLeverage' | 'dailyThetaCostPercent' | 'daysToMaturity';
+    key: 'volume' | 'effectiveLeverage' | 'thetaPercent' | 'daysToMaturity';
     direction: 'asc' | 'desc';
   }>({ key: 'volume', direction: 'desc' });
   
-  // Favorites System
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('warrant_favorites');
@@ -34,22 +31,37 @@ const App: React.FC = () => {
   });
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
-  // 監聽搜尋結果變更
-  useEffect(() => {
-    if (!currentTarget) return;
+  const isCall = activeTab === 'CALL';
 
-    // 訂閱特定標的的搜尋結果
-    const unsubscribe = subscribeToSearchResult(currentTarget, (data, time) => {
-      // 只有當 data 有內容時，才視為搜尋完成
-      if (data.length > 0) {
-        setWarrants(data);
-        setResultTime(time || new Date());
-        setIsSearching(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [currentTarget]);
+  // Dynamic Theme Configuration
+  const theme = {
+    // Colors
+    text: isCall ? 'text-red-500' : 'text-emerald-500',
+    textDim: isCall ? 'text-red-500/80' : 'text-emerald-500/80',
+    titleHighlight: isCall ? 'text-red-600' : 'text-emerald-500',
+    
+    // Borders
+    border: isCall ? 'border-red-900/30' : 'border-emerald-900/30',
+    borderStrong: isCall ? 'border-red-900/50' : 'border-emerald-900/50',
+    
+    // Backgrounds & Gradients
+    gradientVia: isCall ? 'via-red-900' : 'via-emerald-900',
+    glowBlob: isCall ? 'bg-red-900/10' : 'bg-emerald-900/10',
+    iconBoxBg: isCall ? 'bg-red-950/30' : 'bg-emerald-950/30',
+    
+    // Shadows
+    iconShadow: isCall ? 'shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'shadow-[0_0_15px_rgba(16,185,129,0.2)]',
+    inputFocus: isCall ? 'focus-within:border-red-600 focus-within:shadow-[0_0_15px_rgba(220,38,38,0.15)]' : 'focus-within:border-emerald-600 focus-within:shadow-[0_0_15px_rgba(16,185,129,0.15)]',
+    
+    // Interactive Elements
+    searchBtn: isCall ? 'bg-red-900/20 hover:bg-red-600 text-red-500 border-red-900/30' : 'bg-emerald-900/20 hover:bg-emerald-600 text-emerald-500 border-emerald-900/30',
+    pulseBg: isCall ? 'bg-red-500' : 'bg-emerald-500',
+    
+    // Specifics
+    emptyIcon: isCall ? 'text-red-900/40' : 'text-emerald-900/40',
+    loaderBorder: isCall ? 'border-red-500/30 border-t-red-500' : 'border-emerald-500/30 border-t-emerald-500',
+    loaderText: isCall ? 'text-red-500' : 'text-emerald-500',
+  };
 
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,16 +69,25 @@ const App: React.FC = () => {
 
     const targetCode = searchQuery.trim().toUpperCase();
     
-    // 1. 重置 UI 狀態 (清空舊資料，顯示 Loading)
     setWarrants([]); 
     setCurrentTarget(targetCode);
     setIsSearching(true);
-    setShowFavoritesOnly(false); // 自動切回搜尋結果
-    setResultTime(null);
+    setShowFavoritesOnly(false);
 
-    // 2. 發送指令給 Python
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
     try {
-      await sendSearchCommand(targetCode);
+      const commandId = await sendSearchCommand(targetCode);
+      const unsubscribe = subscribeToSearchCommand(commandId, (data, time, isComplete) => {
+        if (isComplete) {
+          setWarrants(data);
+          setIsSearching(false);
+        }
+      });
+      unsubscribeRef.current = unsubscribe;
     } catch (error) {
       console.error("Failed to send command", error);
       setIsSearching(false);
@@ -85,19 +106,16 @@ const App: React.FC = () => {
     localStorage.setItem('warrant_favorites', JSON.stringify(Array.from(newFavs)));
   };
 
-  const handleSort = (key: 'volume' | 'effectiveLeverage' | 'dailyThetaCostPercent' | 'daysToMaturity') => {
+  const handleSort = (key: 'volume' | 'effectiveLeverage' | 'thetaPercent' | 'daysToMaturity') => {
     setSortConfig(current => ({
       key,
       direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
     }));
   };
 
-  // Filter and Sort Logic
   const filteredWarrants = warrants
     .filter(w => {
-      if (showFavoritesOnly) {
-        return favorites.has(w.id);
-      }
+      if (showFavoritesOnly) return favorites.has(w.id);
       if (w.type !== activeTab) return false;
       return true;
     })
@@ -106,179 +124,200 @@ const App: React.FC = () => {
       const valB = b[sortConfig.key];
       return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
     });
-  
-  const activeTabClass = activeTab === 'CALL' 
-    ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)] border-red-500' 
-    : 'bg-green-600 text-white shadow-[0_0_15px_rgba(22,163,74,0.5)] border-green-500';
-  
-  const inactiveTabClass = 'bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700';
 
   return (
-    <div className="min-h-screen bg-black text-slate-200 font-sans selection:bg-slate-700 selection:text-white pb-10">
+    <div className="fixed inset-0 bg-tech-pattern text-slate-200 overflow-hidden font-sans select-none">
       
-      {/* Sticky Header */}
-      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-md border-b border-slate-800 shadow-xl">
-        <div className="max-w-4xl mx-auto px-4 py-3">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-red-900/20 border border-red-900/50">
-                <Target size={24} className="text-red-500" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-bold tracking-tight text-white">權證狙擊手</h1>
-                  <span className="bg-yellow-900/50 text-yellow-300 text-[10px] px-1.5 py-0.5 rounded border border-yellow-800 font-mono flex items-center gap-1">
-                    <Zap size={8} /> V39.0
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                   <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Data Corrected</p>
-                   
-                   <button 
-                     onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-                     className={`ml-2 px-3 py-1 rounded-full border flex items-center gap-1.5 transition-all duration-300 text-xs font-medium ${
-                       showFavoritesOnly 
-                         ? 'bg-yellow-500/20 text-yellow-400 border-yellow-600 shadow-[0_0_10px_rgba(234,179,8,0.3)]' 
-                         : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600'
-                     }`}
-                   >
-                     <Star size={12} className={showFavoritesOnly ? "fill-yellow-400 text-yellow-400" : ""} />
-                     <span>自選 ({favorites.size})</span>
-                   </button>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Decorative Background Glows - Dynamic Color */}
+      <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent ${theme.gradientVia} to-transparent opacity-80 transition-colors duration-500`} />
+      <div className={`absolute top-[-100px] right-[-100px] w-[300px] h-[300px] ${theme.glowBlob} blur-[80px] rounded-full pointer-events-none transition-colors duration-500`} />
 
-          <div className="space-y-3">
-            {/* Search Bar is the HERO now */}
-            <form onSubmit={handleSearchSubmit} className="relative animate-in fade-in slide-in-from-top-2">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 transition-colors ${isSearching ? 'text-red-400 animate-pulse' : 'text-slate-500'}`} size={18} />
-              <input 
-                type="text" 
-                placeholder="輸入代號啟動掃描 (e.g., 2330, 3661)"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white text-lg font-mono tracking-wide rounded-xl pl-10 pr-12 py-3 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/50 transition-all placeholder:text-slate-600 placeholder:font-sans"
-              />
-              {isSearching ? (
-                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                   <Loader2 size={20} className="animate-spin text-red-500" />
+      {/* Main Container */}
+      <div className="relative z-10 flex flex-col h-full max-w-lg mx-auto bg-[#0a0a0a]/90 backdrop-blur-sm border-x border-slate-800 shadow-2xl">
+        
+        {/* Header Section */}
+        <header className={`px-5 py-4 bg-gradient-to-b from-[#111] to-[#0a0a0a] border-b ${theme.border} transition-colors duration-300`}>
+           <div className="flex justify-between items-center mb-5">
+              <div className="flex items-center gap-3">
+                 <div className={`relative flex items-center justify-center w-10 h-10 rounded border transition-all duration-300 ${theme.iconBoxBg} ${theme.borderStrong} ${theme.iconShadow}`}>
+                    <Crosshair className={`${theme.text}`} size={24} />
                  </div>
-              ) : searchQuery && (
-                <button 
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-1"
-                >
-                  <X size={16} />
-                </button>
-              )}
-            </form>
-
-            {!showFavoritesOnly && warrants.length > 0 && (
-              <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1">
-                <button
-                  onClick={() => setActiveTab('CALL')}
-                  className={`flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-bold border transition-all duration-300 ${activeTab === 'CALL' ? activeTabClass : inactiveTabClass}`}
-                >
-                  <TrendingUpIcon className="w-4 h-4" />
-                  認購 (CALL)
-                </button>
-                <button
-                  onClick={() => setActiveTab('PUT')}
-                  className={`flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-bold border transition-all duration-300 ${activeTab === 'PUT' ? activeTabClass : inactiveTabClass}`}
-                >
-                  <TrendingDownIcon className="w-4 h-4" />
-                  認售 (PUT)
-                </button>
-              </div>
-            )}
-
-            {!showFavoritesOnly && warrants.length > 0 && (
-              <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 animate-in fade-in slide-in-from-top-1 no-scrollbar border-t border-slate-800/50 pt-2">
-                <div className="flex gap-2">
-                  {[
-                    { key: 'volume', label: '成交量' },
-                    { key: 'effectiveLeverage', label: '槓桿' },
-                    { key: 'spreadPercent', label: '價差比' },
-                    { key: 'daysToMaturity', label: '天期' }
-                  ].map((item) => (
-                    <button
-                      key={item.key}
-                      onClick={() => handleSort(item.key as any)}
-                      className={`px-3 py-1 rounded text-xs font-mono border whitespace-nowrap transition-colors ${
-                        sortConfig.key === item.key 
-                          ? 'bg-slate-700 text-white border-slate-500' 
-                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600'
-                      }`}
-                    >
-                      {item.label} {sortConfig.key === item.key ? (sortConfig.direction === 'desc' ? '↓' : '↑') : ''}
-                    </button>
-                  ))}
-                </div>
-                {resultTime && (
-                   <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                      Update: {resultTime.toLocaleTimeString()}
-                   </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Main List */}
-      <main className="max-w-4xl mx-auto pb-20">
-        <div className="flex flex-col">
-          {filteredWarrants.length > 0 ? (
-             filteredWarrants.map((w) => (
-              <WarrantRow 
-                key={w.id} 
-                data={w} 
-                onClick={setSelectedWarrant}
-                isCall={w.type === 'CALL'}
-                isFavorite={favorites.has(w.id)}
-                onToggleFavorite={(e) => toggleFavorite(w.id, e)}
-              />
-            ))
-          ) : (
-            <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-6 px-4">
-              {isSearching ? (
-                 <div className="flex flex-col items-center animate-pulse">
-                    <Database size={48} className="text-red-900 opacity-50 mb-4" />
-                    <p className="text-lg text-slate-300 font-medium">雲端伺服器掃描中...</p>
-                    <p className="text-sm text-slate-500 mt-2">正在過濾 5000+ 檔權證，請稍候</p>
-                    <p className="text-xs text-slate-600 mt-1">Status: Pending Backend Response</p>
-                 </div>
-              ) : currentTarget ? (
-                 <div className="text-center">
-                    <Database size={48} className="text-slate-700 mx-auto mb-4" />
-                    <p>該標的目前無符合「高勝率策略」之權證</p>
-                    <p className="text-xs text-slate-500 mt-2">建議：放寬篩選條件或更換標的</p>
-                 </div>
-              ) : (
-                 <div className="text-center">
-                    <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-700">
-                       <Target size={32} className="text-slate-400" />
+                 <div>
+                    <h1 className="text-2xl font-black tracking-wider text-white italic drop-shadow-lg">
+                       權證<span className={`${theme.titleHighlight} transition-colors duration-300`}>狙擊手</span>
+                    </h1>
+                    <div className={`flex items-center gap-2 text-[10px] font-mono ${theme.textDim}`}>
+                       <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${theme.pulseBg}`}></span>
+                       系統監控中
                     </div>
-                    <p className="text-lg text-slate-300">輸入股票代碼開始狙擊</p>
-                    <p className="text-sm text-slate-500 mt-2">支援台股上市櫃所有標的</p>
                  </div>
-              )}
-            </div>
-          )}
-        </div>
-      </main>
+              </div>
+              
+              <button
+                onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                className={`p-2.5 rounded border transition-all duration-300 ${
+                  showFavoritesOnly 
+                  ? 'border-yellow-600/50 bg-yellow-900/20 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]' 
+                  : 'border-slate-800 bg-slate-900/50 text-slate-600 hover:text-white hover:border-slate-600'
+                }`}
+              >
+                 <Star size={20} className={showFavoritesOnly ? "fill-yellow-400" : ""} />
+              </button>
+           </div>
 
-      {/* Modals */}
+           {/* Search Module - Weapon System Style */}
+           <form onSubmit={handleSearchSubmit} className="relative group">
+              <div className={`relative flex items-center bg-[#050505] border border-slate-700/50 rounded transition-all duration-300 ${theme.inputFocus}`}>
+                 <div className="pl-4 text-slate-500">
+                    <Target size={18} />
+                 </div>
+                 <input 
+                    type="text" 
+                    placeholder="輸入股票代號 (例如 2330)"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-transparent px-3 py-3.5 text-lg font-mono text-white placeholder-slate-600 focus:outline-none tracking-wider"
+                 />
+                 {isSearching ? (
+                   <div className={`pr-4 animate-spin ${theme.text}`}>
+                      <Loader2 size={20} />
+                   </div>
+                 ) : (
+                    <button type="submit" className={`mr-1 px-4 py-2 text-xs font-bold rounded-sm border transition-all tracking-wider ${theme.searchBtn}`}>
+                       鎖定
+                    </button>
+                 )}
+              </div>
+           </form>
+        </header>
+
+        {/* Tactical Controls (Call/Put) */}
+        <div className="px-5 py-2 flex items-center justify-between bg-[#0f0f0f] border-b border-slate-800">
+           {/* Custom Toggle Switch */}
+           <div className="flex bg-[#050505] p-1 rounded-lg border border-slate-800 relative">
+              {/* Active Background Pill Animation */}
+              <div 
+                className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded transition-all duration-300 ease-out shadow-lg ${
+                  activeTab === 'CALL' 
+                    ? 'left-1 bg-gradient-to-b from-red-600 to-red-800' 
+                    : 'left-[calc(50%+2px)] bg-gradient-to-b from-emerald-600 to-emerald-800'
+                }`}
+              />
+              
+              <button 
+                 onClick={() => setActiveTab('CALL')}
+                 className={`relative z-10 w-24 py-1.5 text-sm font-bold tracking-wider rounded transition-colors ${
+                    activeTab === 'CALL' ? 'text-white' : 'text-slate-500 hover:text-slate-300'
+                 }`}
+              >
+                 認購
+              </button>
+              <button 
+                 onClick={() => setActiveTab('PUT')}
+                 className={`relative z-10 w-24 py-1.5 text-sm font-bold tracking-wider rounded transition-colors ${
+                    activeTab === 'PUT' ? 'text-white' : 'text-slate-500 hover:text-slate-300'
+                 }`}
+              >
+                 認售
+              </button>
+           </div>
+           
+           {/* Target Info */}
+           <div className="text-right">
+             {currentTarget ? (
+                <div>
+                   <span className="text-[10px] text-slate-500 block uppercase tracking-wider">目標代號</span>
+                   <span className={`font-mono font-bold ${theme.text}`}>{currentTarget}</span>
+                </div>
+             ) : (
+                <div className="flex items-center gap-1 opacity-30">
+                   <Radar size={16} />
+                   <span className="text-[10px]">掃描中</span>
+                </div>
+             )}
+           </div>
+        </div>
+
+        {/* Sort Bar - Removed Days, Renamed Theta */}
+        {warrants.length > 0 && (
+          <div className="flex gap-2 px-5 py-2 bg-[#0a0a0a] border-b border-slate-800/50 overflow-x-auto no-scrollbar">
+              {[
+                { key: 'volume', label: '總量', icon: BarChart3 },
+                { key: 'effectiveLeverage', label: '槓桿', icon: Zap },
+                { key: 'thetaPercent', label: '每日利息', icon: Clock },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => handleSort(item.key as any)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-[11px] font-bold transition-all whitespace-nowrap ${
+                     sortConfig.key === item.key
+                     ? 'bg-slate-800 border-slate-600 text-white shadow-sm'
+                     : 'bg-transparent border-transparent text-slate-500 hover:text-slate-400'
+                  }`}
+                >
+                   <item.icon size={12} />
+                   {item.label}
+                   {sortConfig.key === item.key && (
+                     <span className={`text-[9px] ${theme.text}`}>{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>
+                   )}
+                </button>
+              ))}
+          </div>
+        )}
+
+        {/* Main List Area */}
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
+           
+           {/* Searching Animation Overlay */}
+           {isSearching && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/60 backdrop-blur-sm">
+                 <div className="relative">
+                    <div className={`w-16 h-16 border-4 rounded-full animate-spin ${theme.loaderBorder}`}></div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                       <div className={`w-2 h-2 rounded-full animate-pulse ${theme.pulseBg}`}></div>
+                    </div>
+                 </div>
+                 <p className={`mt-4 font-mono tracking-widest text-sm animate-pulse ${theme.loaderText}`}>正在鎖定目標...</p>
+              </div>
+           )}
+
+           <div className="space-y-3 pb-20">
+              {filteredWarrants.length > 0 ? (
+                 filteredWarrants.map((w, i) => (
+                    <div key={w.id} className="animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ animationDelay: `${i * 30}ms` }}>
+                       <WarrantRow 
+                          data={w} 
+                          onClick={setSelectedWarrant}
+                          isCall={activeTab === 'CALL'}
+                          isFavorite={favorites.has(w.id)}
+                          onToggleFavorite={(e) => toggleFavorite(w.id, e)}
+                       />
+                    </div>
+                 ))
+              ) : (
+                 !isSearching && (
+                    <div className="h-[60vh] flex flex-col items-center justify-center text-slate-800">
+                       <div className="relative mb-6">
+                         <Target size={80} strokeWidth={0.5} className="text-slate-800" />
+                         <div className="absolute inset-0 flex items-center justify-center">
+                            <AlertCircle size={30} className={`${theme.emptyIcon}`} />
+                         </div>
+                       </div>
+                       <p className="font-bold text-slate-600 text-lg">等待目標確認</p>
+                       <p className="text-slate-700 text-sm mt-2 font-mono">請輸入代號開始監控</p>
+                    </div>
+                 )
+              )}
+           </div>
+        </div>
+      </div>
+
       <WarrantModal 
         warrant={selectedWarrant} 
         onClose={() => setSelectedWarrant(null)}
         isFavorite={selectedWarrant ? favorites.has(selectedWarrant.id) : false}
         onToggleFavorite={(e) => selectedWarrant && toggleFavorite(selectedWarrant.id, e)}
       />
-
     </div>
   );
 };

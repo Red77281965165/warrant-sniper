@@ -7,25 +7,44 @@
     <!-- iOS PWA Settings -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="權證戰情室">
+    <meta name="apple-mobile-web-app-title" content="權證狙擊手">
     
     <!-- App Icons & Manifest -->
     <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="apple-touch-icon" href="/icon.png" />
     <link rel="manifest" href="/manifest.json" />
     
-    <title>Warrant War Room | 權證戰情室</title>
+    <!-- Fonts: Noto Sans TC for Chinese, Chakra Petch for Numbers -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    
+    <title>權證狙擊手</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['"Noto Sans TC"', 'sans-serif'],
+              mono: ['"Chakra Petch"', 'monospace'], // Use Chakra Petch for numbers as it looks cool
+            },
             colors: {
-              slate: {
-                850: '#151e2e',
-                900: '#0f172a',
-                950: '#020617',
+              sniper: {
+                red: '#ef4444',
+                dark: '#0a0a0a',
+                surface: '#121212',
+                border: '#2a2a2a',
+              }
+            },
+            animation: {
+              'pulse-glow': 'pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            },
+            keyframes: {
+              'pulse-glow': {
+                '0%, 100%': { opacity: '1', boxShadow: '0 0 10px #ef4444' },
+                '50%': { opacity: '0.5', boxShadow: '0 0 20px #ef4444' },
               }
             }
           }
@@ -34,13 +53,37 @@
     </script>
     <style>
       body {
-        background-color: #000;
+        background-color: #000000;
         overscroll-behavior-y: none;
+        overflow-x: hidden;
+        color: #e2e8f0;
+        font-family: 'Noto Sans TC', sans-serif;
       }
-      ::-webkit-scrollbar { width: 6px; }
-      ::-webkit-scrollbar-track { background: #0f172a; }
-      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-      ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+      /* Tech Background Pattern - Made subtle */
+      .bg-tech-pattern {
+        background-color: #050505;
+        background-image: 
+          linear-gradient(rgba(20, 20, 20, 0.3) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(20, 20, 20, 0.3) 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar { width: 3px; }
+      ::-webkit-scrollbar-track { background: #0a0a0a; }
+      ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+      ::-webkit-scrollbar-thumb:hover { background: #555; }
+      
+      /* Input Autofill Fix */
+      input:-webkit-autofill,
+      input:-webkit-autofill:hover, 
+      input:-webkit-autofill:focus, 
+      input:-webkit-autofill:active{
+          -webkit-box-shadow: 0 0 0 30px #111 inset !important;
+          -webkit-text-fill-color: #fff !important;
+          transition: background-color 5000s ease-in-out 0s;
+      }
     </style>
   <script type="importmap">
 {
@@ -60,7 +103,6 @@
 </head>
   <body>
     <div id="root"></div>
-    <!-- 關鍵修改：加了點 (.) 改成相對路徑 -->
     <script type="module" src="./index.tsx"></script>
   <script type="module" src="/index.tsx"></script>
 </body>

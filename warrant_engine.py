@@ -3,288 +3,341 @@ import os
 import time
 import datetime
 import math
+import requests
+import pandas as pd
+import numpy as np
+from scipy.stats import norm
+from scipy.optimize import brentq
 import firebase_admin
 import shioaji as sj
 from firebase_admin import credentials, firestore
+import threading
 
 # ==========================================
 # 設定區
 # ==========================================
 CRED_PATH = "serviceAccountKey.json" 
 COMMAND_COLLECTION = "search_commands" 
-RESULT_COLLECTION = "search_results"   
 
+# 你的永豐金 API 帳號
 SJ_API_KEY = "4QXJ3FiGFtzR5WvXtf9Tt41xg6dog6VfhZ5qZy6fiMiy"
 SJ_SECRET_KEY = "EHdBKPXyC2h3gpJmHr9UbYtsqup7aREAyn1sLDnb3mCK"
 
-# 篩選條件
-FILTER_CONFIG = {
-    "EXCLUDE_BROKER": "統一",
-    "MIN_VOLUME": 0,          
-    "MIN_PRICE": 0.1,
-    "MAX_PRICE": 50.0,        
-    "MAX_SPREAD_PCT": 10.0,   
-    "MIN_LEVERAGE": 0.0,      # 暫時設0，確保有資料
-    "MAX_LEVERAGE": 999.0 
+# ==========================================
+# 策略篩選設定
+# ==========================================
+STRATEGY_CONFIG = {
+    "EXCLUDE_BROKER": "統一",  # 排除的券商關鍵字
+    "MIN_DAYS_LEFT": 90,       # 最小剩餘天數
+    "MIN_LEVERAGE": 3.0,       # 最小實質槓桿
+    "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
+    "MAX_THETA_PCT": 3.0,      # 最大每日利息% (絕對值)
+    "MIN_VOLUME": 1,           # 最小成交量
+    "MIN_PRICE": 0.1,          # 最低價
+    "MAX_PRICE": 50.0          # 最高價
 }
 
-# 超級字典
-MANUAL_STOCK_MAP = {
-    "2330": "台積電", "3661": "世芯-KY", "2454": "聯發科",
-    "2317": "鴻海", "2303": "聯電", "2603": "長榮",
-    "2344": "華邦電", "2409": "友達", "3481": "群創",
-    "2609": "陽明", "2615": "萬海", "3037": "欣興"
-}
+# 已知券商列表 (用來從權證名字中提取券商)
+KNOWN_BROKERS = [
+    "元大", "凱基", "統一", "永豐", "富邦", "群益", "國泰", "兆豐", 
+    "華南", "玉山", "元富", "康和", "第一", "麥證", "法興", "匯豐", 
+    "國票", "永昌", "亞東"
+]
 
-print("⚡ 正在啟動權證戰情室 (v39.0 數據校正版)...")
+print("⚡ 正在啟動權證戰情室 (v2025.7 券商名稱修復版)...")
 
 # ==========================================
-# 1. 初始化
+# 1. 初始化與 CSV 資料載入
 # ==========================================
+CACHE_SPECS = {} 
+
+def load_csv_data():
+    filename = "warrant_full_data.csv"
+    print(f"📂 正在讀取靜態資料庫: {filename} ...")
+    
+    if not os.path.exists(filename):
+        print(f"❌ 錯誤：找不到 {filename}，請先執行 crawler.py")
+        return
+
+    try:
+        df = pd.read_csv(filename, dtype=str)
+        df['履約價格'] = pd.to_numeric(df['履約價格'].str.replace(',', ''), errors='coerce')
+        df['行使比例'] = pd.to_numeric(df['行使比例'].str.replace(',', ''), errors='coerce')
+        
+        count = 0
+        for _, row in df.iterrows():
+            code = str(row['權證代號']).strip()
+            w_type = 'call'
+            name = str(row['權證簡稱'])
+            if '售' in name: w_type = 'put'
+            elif '購' in name: w_type = 'call'
+            
+            raw_date = str(row['到期日']).strip()
+            if len(raw_date) == 7:
+                raw_date = str(int(raw_date[:3]) + 1911) + raw_date[3:]
+            
+            fmt_date = "2099-12-31"
+            if len(raw_date) == 8:
+                fmt_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+
+            CACHE_SPECS[code] = {
+                "strike_price": float(row['履約價格']),
+                "multiplier": float(row['行使比例']),
+                "maturity_date": fmt_date,
+                "type": w_type,
+                "name": name
+            }
+            count += 1
+            
+        print(f"✅ 成功載入 {count} 檔權證詳細規格！")
+    except Exception as e:
+        print(f"❌ 讀取 CSV 發生錯誤: {e}")
+
+# 初始化 Firebase
 if not os.path.exists(CRED_PATH):
-    print(f"❌ 找不到金鑰檔案")
-    sys.exit(1)
-
-try:
-    cred = credentials.Certificate(CRED_PATH)
-    if not firebase_admin._apps: firebase_admin.initialize_app(cred)
-    db = firestore.client()
-    print("✅ Firebase 連線成功")
-except Exception as e:
+    print(f"❌ 找不到 Firebase 金鑰: {CRED_PATH}")
     db = None
+else:
+    try:
+        cred = credentials.Certificate(CRED_PATH)
+        if not firebase_admin._apps: firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("✅ Firebase 連線成功")
+    except Exception as e:
+        print(f"❌ Firebase 初始化失敗: {e}")
+        db = None
 
+# 初始化 Shioaji
 api = sj.Shioaji()
 try:
     api.login(api_key=SJ_API_KEY, secret_key=SJ_SECRET_KEY)
     print("✅ Shioaji 登入成功")
-    time.sleep(2)
 except Exception as e:
+    print(f"❌ API 登入失敗: {e}")
     sys.exit(1)
 
-if not api.simulation:
-    print("🚀 [A計畫] 加速引擎運作中 (Excellent!)")
-else:
-    print("⚠️ [警告] 仍在慢速模式")
+load_csv_data()
 
 # ==========================================
-# 2. 建立資料庫
+# 2. 金融工程核心
 # ==========================================
-ALL_WARRANTS = []
-STOCK_NAME_MAP = MANUAL_STOCK_MAP.copy()
-
-def build_data():
-    print("📥 正在下載全市場清單...")
-    try:
-        api.fetch_contracts(contract_download=True)
-    except: pass
-    
-    global ALL_WARRANTS, STOCK_NAME_MAP
-    ALL_WARRANTS = []
-    
-    for i in range(120):
-        if hasattr(api.Contracts, 'Stocks') and hasattr(api.Contracts.Stocks, 'TSE'):
-            tse = list(api.Contracts.Stocks.TSE)
-            otc = list(api.Contracts.Stocks.OTC)
-            
-            if len(tse) + len(otc) > 5000:
-                print(f"✅ 下載完成，正在建立索引...")
-                all_s = tse + otc
-                for c in all_s:
-                    if len(c.code) == 4: 
-                        STOCK_NAME_MAP[c.code] = c.name
-                    if "購" in c.name or "售" in c.name:
-                        if len(c.code) == 6:
-                            ALL_WARRANTS.append(c)
-                break
-        time.sleep(1)
-    
-    print(f"🗺️ 索引完成！權證總數: {len(ALL_WARRANTS)} 筆")
-
-# ==========================================
-# 3. 狙擊邏輯 (強力校正)
-# ==========================================
-def clean_stock_name(name):
-    return name.replace("-KY", "").replace("-DR", "").replace("*", "").strip()
-
-def extract_broker(warrant_name, stock_name):
-    try:
-        clean_s_name = clean_stock_name(stock_name)
-        temp = warrant_name.replace(clean_s_name, "")
-        return temp[:2]
-    except: return "N/A"
-
-class FinanceCalculator:
+class FinancialEngine:
     @staticmethod
-    def days_to_maturity(contract):
-        # 取得原始資料
-        raw_date = getattr(contract, 'delivery_date', '')
-        
-        target_date = None
+    def bs_price(sigma, S, K, T, r, option_type='call'):
         try:
-            # 情況1: 字串格式 "20250301"
-            if isinstance(raw_date, str):
-                d_str = raw_date.replace("/", "").replace("-", "")[:8]
-                if len(d_str) == 8:
-                    target_date = datetime.datetime.strptime(d_str, "%Y%m%d").date()
-            
-            # 情況2: 整數格式 20250301 (加速版常見)
-            elif isinstance(raw_date, int):
-                target_date = datetime.datetime.strptime(str(raw_date), "%Y%m%d").date()
-                
-        except: pass
-        
-        if target_date:
-            today = datetime.date.today()
-            return max(0, (target_date - today).days)
-        return 0
+            if T <= 0: return 0
+            d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+            d2 = d1 - sigma * np.sqrt(T)
+            if option_type == 'call':
+                return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+            else:
+                return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+        except: return 0
 
     @staticmethod
-    def calculate_leverage(price, strike, multiplier):
-        # 如果行使比例是 0，我們預設給 0.1 (救命補丁)
-        if multiplier == 0: multiplier = 0.1
-        
-        if price > 0 and strike > 0:
-            return (strike * multiplier) / price
-        return 0.0
+    def implied_volatility(price, S, K, T, r, option_type='call'):
+        try:
+            intrinsic = max(0, S - K) if option_type == 'call' else max(0, K - S)
+            if price <= intrinsic: return np.nan 
+            return brentq(lambda x: FinancialEngine.bs_price(x, S, K, T, r, option_type) - price, 0.001, 5.0)
+        except: return np.nan
 
-def process_search(query_text):
-    print(f"\n🔔 收到搜尋指令：{query_text}")
+    @staticmethod
+    def calculate_greeks(S, K, T, r, sigma, option_type='call'):
+        try:
+            if sigma <= 0 or T <= 0: return 0, 0
+            d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+            d2 = d1 - sigma * np.sqrt(T)
+            
+            if option_type == 'call': delta = norm.cdf(d1)
+            else: delta = norm.cdf(d1) - 1
+                
+            term1 = -(S * norm.pdf(d1) * sigma) / (2 * np.sqrt(T))
+            if option_type == 'call':
+                theta = term1 - r * K * np.exp(-r * T) * norm.cdf(d2)
+            else:
+                theta = term1 + r * K * np.exp(-r * T) * norm.cdf(-d2)
+            return delta, theta
+        except: return 0, 0
+
+# ==========================================
+# 3. 索引建立
+# ==========================================
+ALL_WARRANTS = [] 
+STOCK_CODE_TO_NAME = {}
+STOCK_NAME_TO_CODE = {}
+
+def build_contract_index():
+    print("📥 建立全市場索引...")
+    tse = list(api.Contracts.Stocks.TSE) if hasattr(api.Contracts.Stocks, 'TSE') else []
+    otc = list(api.Contracts.Stocks.OTC) if hasattr(api.Contracts.Stocks, 'OTC') else []
     
-    target_warrants = []
-    search_keywords = []
-    stock_display_name = str(query_text)
+    for c in tse + otc:
+        if len(c.code) == 4: 
+            STOCK_CODE_TO_NAME[c.code] = c.name
+            STOCK_NAME_TO_CODE[c.name] = c.code
+        if c.code in CACHE_SPECS:
+            ALL_WARRANTS.append(c)
+    print(f"🗺️ 索引完成！含 {len(ALL_WARRANTS)} 檔有效權證。")
 
+# ==========================================
+# 4. 搜尋與運算主邏輯
+# ==========================================
+def process_search(query_text):
+    print(f"\n🔔 [Firebase] 收到搜尋請求：{query_text}")
+    
     query_str = str(query_text).strip()
-    if query_str in STOCK_NAME_MAP:
-        full_name = STOCK_NAME_MAP[query_str]
-        stock_display_name = clean_stock_name(full_name)
-        print(f"   🔍 代碼匹配 -> {full_name}")
-        search_keywords.append(stock_display_name)
+    mother_name = query_str
+    mother_code = None
+
+    if query_str in STOCK_CODE_TO_NAME:
+        mother_code = query_str
+        mother_name = STOCK_CODE_TO_NAME[query_str]
+    elif query_str in STOCK_NAME_TO_CODE:
+        mother_name = query_str
+        mother_code = STOCK_NAME_TO_CODE[query_str]
     else:
-        stock_display_name = clean_stock_name(query_str)
-        print(f"   🔍 文字匹配 -> {stock_display_name}")
-        search_keywords.append(stock_display_name)
-
-    for w in ALL_WARRANTS:
-        for keyword in search_keywords:
-            if keyword in w.name:
-                target_warrants.append(w)
+        for name, code in STOCK_NAME_TO_CODE.items():
+            if query_str in name:
+                mother_name = name
+                mother_code = code
                 break
-
-    if not target_warrants:
-        print(f"   ⚠️ 找不到相關權證")
+    
+    if not mother_code:
+        print("   ❌ 找不到此股票代號")
         return []
 
-    print(f"   📋 找到 {len(target_warrants)} 檔權證，抓取數據中...")
-    
-    valid_results = []
-    
-    # 診斷旗標：只印一次
-    debug_printed = False
+    print(f"   🔍 正在抓取標的 ({mother_name}) 即時報價...")
+    mother_price = 0.0
+    try:
+        m_contract = api.Contracts.Stocks.TSE.get(mother_code) or api.Contracts.Stocks.OTC.get(mother_code)
+        if m_contract:
+            s = api.snapshots([m_contract])
+            if s: 
+                mother_price = s[0].close
+                print(f"   📊 標的價格: {mother_price}")
+    except Exception as e:
+        print(f"   ❌ 標的報價抓取錯誤: {e}")
+
+    if mother_price == 0:
+        print("   ⚠️ 標的無價格，無法計算。")
+        return []
+
+    search_name = mother_name.replace("-KY", "").replace("KY", "").strip()
+
+    target_warrants = []
+    for w in ALL_WARRANTS:
+        if search_name in w.name:
+            if STRATEGY_CONFIG["EXCLUDE_BROKER"] in w.name:
+                continue 
+            target_warrants.append(w)
+        
+    if not target_warrants:
+        print(f"   ⚠️ 找不到權證 (關鍵字: {search_name})")
+        return []
+
+    print(f"   📋 初步鎖定 {len(target_warrants)} 檔權證，進行計算與篩選...")
 
     chunk_size = 200
+    valid_results = []
+    
     for i in range(0, len(target_warrants), chunk_size):
         chunk = target_warrants[i:i+chunk_size]
-        snapshots = []
         try:
             snapshots = api.snapshots(chunk)
-        except: pass
+        except: continue
         
-        snap_map = {s.code: s for s in snapshots} if snapshots else {}
+        snap_map = {s.code: s for s in snapshots}
         
         for c in chunk:
-            price = 0.0
-            volume = 0
-            bid_price = 0.0
-            bid_vol = 0
-            ask_price = 0.0
-            ask_vol = 0
+            if c.code not in snap_map: continue
+            if c.code not in CACHE_SPECS: continue
             
-            if c.code in snap_map:
-                snap = snap_map[c.code]
-                price = snap.close
-                volume = snap.total_volume
-                bid_price = snap.buy_price
-                bid_vol = snap.buy_volume
-                ask_price = snap.sell_price
-                ask_vol = snap.sell_volume
+            snap = snap_map[c.code]
+            market_price = snap.close
+            if market_price == 0 and snap.buy_price > 0: market_price = snap.buy_price
+            if market_price == 0: continue
             
-            if price == 0:
-                if hasattr(c, 'reference') and c.reference > 0:
-                    price = float(c.reference)
-                elif hasattr(c, 'limit_up') and hasattr(c, 'limit_down'):
-                    price = (float(c.limit_up) + float(c.limit_down)) / 2
-
-            if price == 0: continue
-
-            # 篩選
-            if FILTER_CONFIG["EXCLUDE_BROKER"] in c.name: continue
-            if price < FILTER_CONFIG["MIN_PRICE"] or price > FILTER_CONFIG["MAX_PRICE"]: continue
-            if volume < FILTER_CONFIG["MIN_VOLUME"]: continue
-
-            # --- 屬性讀取 (強力校正) ---
-            strike = 0.0
-            mult = 0.0
-            try:
-                if hasattr(c, 'strike_price'): strike = float(c.strike_price)
-                
-                if hasattr(c, 'multiplier'): mult = float(c.multiplier)
-                elif hasattr(c, 'strike_rate'): mult = float(c.strike_rate)
-            except: pass
-
-            # --- 診斷區：印出第一筆資料的原始樣貌 ---
-            if not debug_printed and strike > 0:
-                print("\n   🕵️ [數據診斷] 成功抓取範例:")
-                print(f"   👉 名稱: {c.name}")
-                print(f"   👉 原始日期: {c.delivery_date} (Type: {type(c.delivery_date)})")
-                print(f"   👉 履約價: {strike}")
-                print(f"   👉 行使比例: {mult}")
-                debug_printed = True
-            # -----------------------------------
-
-            # 計算
-            lev = FinanceCalculator.calculate_leverage(price, strike, mult)
-            days = FinanceCalculator.days_to_maturity(c)
+            bid_price = snap.buy_price if snap.buy_price > 0 else market_price
+            volume = snap.total_volume
             
-            # 價差
-            spread = 0.0
-            if bid_price > 0 and ask_price > 0:
-                spread = ((ask_price - bid_price) / bid_price) * 100
+            if volume <= STRATEGY_CONFIG["MIN_VOLUME"]: continue
+            if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
 
-            # 五檔
-            bids = []
-            asks = []
-            if bid_price > 0: bids.append({"price": bid_price, "volume": bid_vol})
-            if ask_price > 0: asks.append({"price": ask_price, "volume": ask_vol})
+            specs = CACHE_SPECS[c.code]
+            strike = specs['strike_price']
+            multiplier = specs['multiplier']
+            maturity_date_str = specs['maturity_date']
+            w_type = specs['type']
 
-            broker_name = extract_broker(c.name, stock_display_name)
+            effective_leverage = 0.0
+            theta_pct = 0.0 
+            days_left = 0
+            iv_display = 0.0
+            
+            if mother_price > 0 and strike > 0:
+                try:
+                    m_date = datetime.datetime.strptime(maturity_date_str, "%Y-%m-%d").date()
+                    days_left = (m_date - datetime.date.today()).days
+                    
+                    if days_left < STRATEGY_CONFIG["MIN_DAYS_LEFT"]: continue
+                    
+                    if days_left > 0:
+                        T = days_left / 365.0
+                        r_rate = 0.015 
+                        opt_price_per_share = market_price / multiplier if multiplier > 0 else market_price
+                        
+                        iv = FinancialEngine.implied_volatility(opt_price_per_share, mother_price, strike, T, r_rate, w_type)
+                        
+                        if not np.isnan(iv):
+                            delta, theta_annual = FinancialEngine.calculate_greeks(mother_price, strike, T, r_rate, iv, w_type)
+                            effective_leverage = (mother_price * abs(delta) * multiplier) / market_price
+                            
+                            if effective_leverage < STRATEGY_CONFIG["MIN_LEVERAGE"] or effective_leverage > STRATEGY_CONFIG["MAX_LEVERAGE"]:
+                                continue
 
-            valid_results.append({
-                "id": c.code,
-                "name": c.name,
-                "price": round(float(price), 2),
-                "volume": int(volume),
-                "lev": round(lev, 2),
-                "strike": strike,
-                "spread": round(spread, 1),
-                "days": days,
-                "bids": bids, 
-                "asks": asks,
-                "broker": broker_name, 
-                "theta": 0.0 
-            })
+                            theta_cost_dollar = (theta_annual / 365.0) * multiplier
+                            if bid_price > 0:
+                                theta_pct = (theta_cost_dollar / bid_price) * 100
+                            
+                            if abs(theta_pct) > STRATEGY_CONFIG["MAX_THETA_PCT"]:
+                                continue
+                            
+                            iv_display = round(iv * 100, 1)
+                            
+                            # 【修正】券商名稱提取
+                            broker_name = "其他"
+                            for b in KNOWN_BROKERS:
+                                if b in c.name:
+                                    broker_name = b
+                                    break
+                            
+                            valid_results.append({
+                                "id": c.code,
+                                "name": c.name,
+                                "price": round(float(market_price), 2),
+                                "volume": int(volume),
+                                "lev": round(effective_leverage, 2),
+                                "theta_pct": round(theta_pct, 2),
+                                "days": days_left,
+                                "strike": strike,
+                                "iv": iv_display,
+                                "broker": broker_name, # 回傳正確的券商名
+                            })
+                except Exception:
+                    pass
 
     valid_results.sort(key=lambda x: x['volume'], reverse=True)
-    
-    if not valid_results:
-        print(f"   ⚠️ 篩選後無資料")
+
+    if valid_results:
+        print(f"   ✅ 計算完成！找到 {len(valid_results)} 檔符合策略的權證")
     else:
-        print(f"   ✅ 成功篩選出 {len(valid_results)} 筆資料")
+        print("   ⚠️ 篩選後無符合資料")
 
     return valid_results
 
 # ==========================================
-# 4. 監聽 Firebase
+# 5. Firebase 監聽邏輯
 # ==========================================
 def on_snapshot(col_snapshot, changes, read_time):
     for change in changes:
@@ -293,25 +346,48 @@ def on_snapshot(col_snapshot, changes, read_time):
             data = doc.to_dict()
             if data.get('status') == 'pending':
                 query_text = data.get('stock_code') or data.get('query')
+                
                 if query_text:
                     results = process_search(str(query_text))
-                    safe_id = str(query_text).replace("/", "").replace(".", "")
-                    db.collection(RESULT_COLLECTION).document(safe_id).set({
-                        "query": query_text,
-                        "updatedAt": firestore.SERVER_TIMESTAMP,
-                        "results": results
-                    })
-                    doc.reference.update({"status": "completed"})
-                    print(f"   ☁️ 已回傳結果至 App\n")
+                    
+                    clean_results = []
+                    for item in results:
+                        clean_item = {}
+                        for k, v in item.items():
+                            if isinstance(v, (np.integer, np.int64)):
+                                clean_item[k] = int(v)
+                            elif isinstance(v, (np.floating, np.float64)):
+                                clean_item[k] = float(v)
+                            else:
+                                clean_item[k] = v
+                        clean_results.append(clean_item)
+
+                    try:
+                        doc.reference.update({
+                            "status": "completed",
+                            "updatedAt": firestore.SERVER_TIMESTAMP,
+                            "count": len(clean_results),
+                            "data": clean_results
+                        })
+                        print(f"   ☁️ 成功！資料已直接回傳給 App (Doc ID: {doc.id})")
+                    except Exception as e:
+                        print(f"   ❌ 上傳失敗: {e}")
 
 def start_server():
-    build_data()
-    print(f"📡 伺服器已啟動，監聽中...")
-    col_ref = db.collection(COMMAND_COLLECTION)
-    col_watch = col_ref.on_snapshot(on_snapshot)
-    while True:
-        try: time.sleep(1)
-        except KeyboardInterrupt: break
+    build_contract_index()
+    print(f"📡 伺服器啟動成功！正在監聽 Firebase 指令...")
+    print(f"   (請保持此視窗開啟，電腦會自動處理 App 的請求)")
+    
+    if db:
+        col_ref = db.collection(COMMAND_COLLECTION)
+        col_watch = col_ref.on_snapshot(on_snapshot)
+        while True:
+            try: time.sleep(1)
+            except KeyboardInterrupt:
+                print("🛑 伺服器停止中...")
+                break
+    else:
+        print("❌ 無法連接 Firebase，請檢查 Key 設定。")
 
 if __name__ == "__main__":
     start_server()

@@ -16,27 +16,25 @@ export interface WarrantData {
   // Real-time Market Data
   price: number; // Current Market Price (Last)
   strikePrice: number; // 履約價
-  
-  // Optional fields (Python script might not provide these explicitly)
-  change?: number;
-  changePercent?: number;
-  delta?: number;
-  
   volume: number; // 當日成交量
   
-  // Best Bid/Ask
-  bestBidPrice: number;
-  bestBidVol: number;
-  bestAskPrice: number;
-  bestAskVol: number;
+  // Calculated Metrics from Python Backend
+  effectiveLeverage: number; // 實質槓桿 (lev)
+  thetaPercent: number;      // Theta % (theta_pct)
+  daysToMaturity: number;    // 剩餘天數 (days)
+  impliedVolatility: number; // 隱含波動率 (iv)
 
-  // Calculated Metrics
-  effectiveLeverage: number; // 實質槓桿
-  dailyThetaCostPercent: number; // 每日利息成本 %
-  spreadPercent: number; // 價差比
-  daysToMaturity: number;
+  // Optional/Legacy fields
+  delta?: number;             
+  spreadPercent?: number;     
+  change?: number;
+  changePercent?: number;
+  
+  bestBidPrice?: number;
+  bestBidVol?: number;
+  bestAskPrice?: number;
+  bestAskVol?: number;
 
-  // Depth (Python script v23.0 may not return depth, allow empty)
   bids: OrderBookEntry[];
   asks: OrderBookEntry[];
 }
