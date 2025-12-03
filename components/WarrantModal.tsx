@@ -32,8 +32,8 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
         <div className="relative px-6 py-5 bg-[#141414] border-b border-slate-800 flex justify-between items-start">
            <div>
               <div className="flex items-center gap-3">
-                 <h2 className="text-3xl font-black text-white font-mono tracking-wide">{warrant.symbol}</h2>
-                 <span className={`text-xs font-bold px-2 py-0.5 border rounded ${isCall ? 'border-red-500 text-red-500 bg-red-950/30' : 'border-emerald-500 text-emerald-500 bg-emerald-950/30'}`}>
+                 <h2 className="text-5xl font-black text-white font-mono tracking-wide">{warrant.symbol}</h2>
+                 <span className={`text-base font-bold px-3 py-1 border rounded ${isCall ? 'border-red-500 text-red-500 bg-red-950/30' : 'border-emerald-500 text-emerald-500 bg-emerald-950/30'}`}>
                     {isCall ? '認購' : '認售'}
                  </span>
               </div>
@@ -58,15 +58,15 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
               {/* Main Price Row */}
               <div className="flex items-end justify-between pb-4 border-b border-slate-800/50">
                  <div>
-                    <p className="text-xs text-slate-500 font-bold mb-1">即時成交價</p>
+                    <p className="text-sm text-slate-500 font-bold mb-1">即時成交價</p>
                     <div className="flex items-baseline gap-2">
-                       <span className={`text-5xl font-mono font-bold ${themeText} drop-shadow-md`}>{warrant.price.toFixed(2)}</span>
-                       <span className="text-slate-500 text-sm">TWD</span>
+                       <span className={`text-7xl font-mono font-bold ${themeText} drop-shadow-md`}>{warrant.price.toFixed(2)}</span>
+                       <span className="text-slate-500 text-xl">TWD</span>
                     </div>
                  </div>
                  <div className="text-right">
-                     <p className="text-xs text-slate-500 font-bold mb-1">當日成交量</p>
-                     <div className="text-2xl font-mono font-bold text-white">{warrant.volume.toLocaleString()}</div>
+                     <p className="text-sm text-slate-500 font-bold mb-1">當日成交量</p>
+                     <div className="text-3xl font-mono font-bold text-white">{warrant.volume.toLocaleString()}</div>
                  </div>
               </div>
 
@@ -75,21 +75,21 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
                  {/* Leverage */}
                  <div className="bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm relative overflow-hidden">
                     <div className="flex items-center gap-2 mb-2 text-slate-400">
-                       <Zap size={14} className="text-yellow-500" />
-                       <span className="text-xs font-bold">槓桿</span>
+                       <Zap size={16} className="text-yellow-500" />
+                       <span className="text-sm font-bold">槓桿</span>
                     </div>
-                    <p className="text-2xl font-mono font-bold text-white">
-                       {warrant.effectiveLeverage.toFixed(2)}<span className="text-sm text-slate-600 ml-1">x</span>
+                    <p className="text-4xl font-mono font-bold text-white">
+                       {warrant.effectiveLeverage.toFixed(2)}<span className="text-lg text-slate-600 ml-1">x</span>
                     </p>
                  </div>
 
                  {/* Theta / Daily Interest */}
                  <div className="bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm">
                     <div className="flex items-center gap-2 mb-2 text-slate-400">
-                       <Clock size={14} className={Math.abs(warrant.thetaPercent) > 1.5 ? 'text-red-500' : 'text-slate-500'} />
-                       <span className="text-xs font-bold">每日利息 (Theta)</span>
+                       <Clock size={16} className={Math.abs(warrant.thetaPercent) > 1.5 ? 'text-red-500' : 'text-slate-500'} />
+                       <span className="text-sm font-bold">每日利息 (Theta)</span>
                     </div>
-                    <p className={`text-2xl font-mono font-bold ${Math.abs(warrant.thetaPercent) > 2 ? 'text-red-400' : 'text-slate-300'}`}>
+                    <p className={`text-4xl font-mono font-bold ${Math.abs(warrant.thetaPercent) > 2 ? 'text-red-400' : 'text-slate-300'}`}>
                        {warrant.thetaPercent}%
                     </p>
                  </div>
@@ -97,10 +97,10 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
                  {/* Days Left */}
                  <div className="col-span-2 bg-[#1a1a1a]/50 border border-slate-800 p-4 rounded-sm">
                     <div className="flex items-center gap-2 mb-2 text-slate-400">
-                       <Calendar size={14} />
-                       <span className="text-xs font-bold">剩餘天數</span>
+                       <Calendar size={16} />
+                       <span className="text-sm font-bold">剩餘天數</span>
                     </div>
-                    <p className="text-xl font-mono font-bold text-slate-200">{warrant.daysToMaturity} <span className="text-xs text-slate-500">天</span></p>
+                    <p className="text-3xl font-mono font-bold text-slate-200">{warrant.daysToMaturity} <span className="text-lg text-slate-500">天</span></p>
                  </div>
               </div>
 
@@ -118,10 +118,10 @@ const WarrantModal: React.FC<WarrantModalProps> = ({ warrant, onClose, isFavorit
               {/* Order Book */}
               <div className="pt-2">
                  <div className="flex items-center justify-between mb-3 border-l-2 border-red-500 pl-3">
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
                        最佳委買&委賣
                     </h3>
-                    <span className="text-[10px] text-slate-500 font-mono">LIVE DATA</span>
+                    <span className="text-xs text-slate-500 font-mono">LIVE DATA</span>
                  </div>
                  <OrderBook bids={warrant.bids} asks={warrant.asks} type={warrant.type} />
               </div>

@@ -32,9 +32,9 @@ STRATEGY_CONFIG = {
     "MIN_LEVERAGE": 3.0,       # 最小實質槓桿
     "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
     "MAX_THETA_PCT": 3.0,      # 最大每日利息% (絕對值)
-    "MIN_VOLUME": 1,           # 最小成交量
-    "MIN_PRICE": 0.1,          # 最低價
-    "MAX_PRICE": 50.0          # 最高價
+    "MIN_VOLUME": 10,           # 最小成交量
+    "MIN_PRICE": 0.25,          # 最低價
+    "MAX_PRICE": 3.0          # 最高價
 }
 
 # 已知券商列表

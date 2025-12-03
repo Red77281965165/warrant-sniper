@@ -19,9 +19,9 @@ const OrderBook: React.FC<OrderBookProps> = ({ bids, asks, type }) => {
   }));
 
   return (
-    <div className="w-full text-xs font-mono rounded-sm bg-[#050505] border border-slate-800 overflow-hidden">
+    <div className="w-full rounded-sm bg-[#050505] border border-slate-800 overflow-hidden">
       {/* Header */}
-      <div className="grid grid-cols-4 bg-slate-900/50 text-slate-500 py-2 text-center border-b border-slate-800 font-bold tracking-wider text-[10px]">
+      <div className="grid grid-cols-4 bg-slate-900/50 text-slate-500 py-3 text-center border-b border-slate-800 font-bold tracking-wider text-xs">
         <span>委買量</span>
         <span>買進</span>
         <span>賣出</span>
@@ -33,8 +33,8 @@ const OrderBook: React.FC<OrderBookProps> = ({ bids, asks, type }) => {
         <div key={i} className="grid grid-cols-4 items-center border-b border-slate-800/30 last:border-0 relative hover:bg-white/5 transition-colors group">
           
           {/* Bid Volume */}
-          <div className="relative h-8 flex items-center justify-end px-2 border-r border-slate-800/30">
-             <span className={`relative z-10 ${row.bid.volume > 0 ? 'text-slate-300' : 'text-slate-800 group-hover:text-slate-600'}`}>
+          <div className="relative h-12 flex items-center justify-end px-3 border-r border-slate-800/30">
+             <span className={`relative z-10 text-base font-mono ${row.bid.volume > 0 ? 'text-slate-300' : 'text-slate-800 group-hover:text-slate-600'}`}>
                {row.bid.volume > 0 ? row.bid.volume : '-'}
              </span>
              {row.bid.volume > 0 && (
@@ -46,18 +46,18 @@ const OrderBook: React.FC<OrderBookProps> = ({ bids, asks, type }) => {
           </div>
 
           {/* Bid Price */}
-          <div className={`h-8 flex items-center justify-center font-bold border-r border-slate-800/30 ${row.bid.price > 0 ? highlightColor : 'text-slate-800'}`}>
+          <div className={`h-12 flex items-center justify-center font-bold font-mono text-xl border-r border-slate-800/30 ${row.bid.price > 0 ? highlightColor : 'text-slate-800'}`}>
             {row.bid.price > 0 ? row.bid.price.toFixed(2) : '-'}
           </div>
 
           {/* Ask Price */}
-          <div className={`h-8 flex items-center justify-center font-bold border-r border-slate-800/30 ${row.ask.price > 0 ? highlightColor : 'text-slate-800'}`}>
+          <div className={`h-12 flex items-center justify-center font-bold font-mono text-xl border-r border-slate-800/30 ${row.ask.price > 0 ? highlightColor : 'text-slate-800'}`}>
             {row.ask.price > 0 ? row.ask.price.toFixed(2) : '-'}
           </div>
 
           {/* Ask Volume */}
-          <div className="relative h-8 flex items-center justify-start px-2">
-             <span className={`relative z-10 ${row.ask.volume > 0 ? 'text-slate-300' : 'text-slate-800 group-hover:text-slate-600'}`}>
+          <div className="relative h-12 flex items-center justify-start px-3">
+             <span className={`relative z-10 text-base font-mono ${row.ask.volume > 0 ? 'text-slate-300' : 'text-slate-800 group-hover:text-slate-600'}`}>
                {row.ask.volume > 0 ? row.ask.volume : '-'}
              </span>
              {row.ask.volume > 0 && (
