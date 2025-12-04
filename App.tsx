@@ -59,8 +59,6 @@ const App: React.FC = () => {
         pulse: 'bg-yellow-600',
         ring: 'focus:ring-yellow-500/50',
         inputBorder: 'focus:border-yellow-500/50',
-        // Tab specific
-        tabActive: 'bg-yellow-500 text-black shadow-lg shadow-yellow-900/20'
       };
     }
     
@@ -81,8 +79,6 @@ const App: React.FC = () => {
         pulse: 'bg-emerald-600',
         ring: 'focus:ring-emerald-500/50',
         inputBorder: 'focus:border-emerald-500/50',
-        // Tab specific
-        tabActive: 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20'
       };
     }
 
@@ -102,8 +98,6 @@ const App: React.FC = () => {
       pulse: 'bg-red-600',
       ring: 'focus:ring-red-500/50',
       inputBorder: 'focus:border-red-500/50',
-      // Tab specific
-      tabActive: 'bg-red-600 text-white shadow-lg shadow-red-900/20'
     };
   })();
 
@@ -261,7 +255,7 @@ const App: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="請指定獵殺目標...(例如2330)"
+                placeholder="請指定獵殺目標...(例如 2330)"
                 className={`w-full bg-[#050505] border border-slate-800 text-white pl-12 pr-20 py-3.5 rounded-lg focus:outline-none ${theme.inputBorder} focus:ring-1 ${theme.ring} transition-all font-mono tracking-wider placeholder:text-slate-600`}
               />
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
@@ -282,40 +276,32 @@ const App: React.FC = () => {
 
           {/* Controls: Type Toggle & Sort */}
           <div className="flex items-center justify-between gap-4">
-             {/* Type Toggle - Sliding Switch */}
+             {/* Type Toggle - Solid Buttons per Screenshot */}
              {!showFavoritesOnly ? (
-               <div className="relative flex w-full p-1 bg-[#050505] rounded-lg border border-slate-800 shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]">
-                  {/* Sliding Background Element */}
-                  <div 
-                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-md transition-all duration-300 ease-out shadow-lg z-0 ${
-                      activeTab === 'CALL' 
-                        ? 'left-1 bg-red-600 shadow-[0_0_15px_rgba(220,38,38,0.5)] border border-red-400' 
-                        : 'left-[calc(50%+2px)] bg-emerald-600 shadow-[0_0_15px_rgba(16,185,129,0.5)] border border-emerald-400'
-                    }`}
-                  />
-
-                  {/* Call Button */}
+               <div className="flex w-full gap-2">
                   <button 
                     onClick={() => setActiveTab('CALL')}
-                    className={`relative z-10 flex-1 py-2 text-sm font-black tracking-widest transition-colors duration-200 ${
-                        activeTab === 'CALL' ? 'text-white' : 'text-slate-600 hover:text-slate-400'
+                    className={`flex-1 py-2 rounded-md font-black text-base tracking-widest transition-all border ${
+                        activeTab === 'CALL' 
+                        ? 'bg-[#ef4444] text-white border-[#ef4444] shadow-[0_4px_20px_rgba(239,68,68,0.3)]' 
+                        : 'bg-[#1a1a1a] text-[#555] border-[#333] hover:border-[#555] hover:text-[#777]'
                     }`}
                   >
                     認購
                   </button>
-                  
-                  {/* Put Button */}
                   <button 
                     onClick={() => setActiveTab('PUT')}
-                    className={`relative z-10 flex-1 py-2 text-sm font-black tracking-widest transition-colors duration-200 ${
-                        activeTab === 'PUT' ? 'text-white' : 'text-slate-600 hover:text-slate-400'
+                    className={`flex-1 py-2 rounded-md font-black text-base tracking-widest transition-all border ${
+                        activeTab === 'PUT' 
+                        ? 'bg-[#10b981] text-white border-[#10b981] shadow-[0_4px_20px_rgba(16,185,129,0.3)]' 
+                        : 'bg-[#1a1a1a] text-[#555] border-[#333] hover:border-[#555] hover:text-[#777]'
                     }`}
                   >
                     認售
                   </button>
                </div>
              ) : (
-                <div className="text-yellow-500 font-bold flex items-center gap-2 px-2">
+                <div className="text-yellow-500 font-bold flex items-center gap-2 px-2 py-3">
                    <Star className="fill-yellow-500" size={16} />
                    自選監控清單
                 </div>
