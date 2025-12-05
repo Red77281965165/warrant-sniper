@@ -2,10 +2,15 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle, RefreshCw } from 'lucide-react';
 import WarrantRow from './components/WarrantRow';
 import WarrantModal from './components/WarrantModal';
+import LoginScreen from './components/LoginScreen';
 import { WarrantData } from './types';
 import { sendSearchCommand, subscribeToSearchCommand } from './services/firebaseService';
 
 const App: React.FC = () => {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+
+  // App State
   const [activeTab, setActiveTab] = useState<'CALL' | 'PUT'>('CALL');
   const [warrants, setWarrants] = useState<WarrantData[]>([]);
   const [selectedWarrant, setSelectedWarrant] = useState<WarrantData | null>(null);
@@ -106,6 +111,15 @@ const App: React.FC = () => {
     localStorage.setItem('warrant_favorites_v2', JSON.stringify(savedWarrants));
   }, [savedWarrants]);
 
+  // Auth Handlers
+  const validatePassword = (password: string) => {
+    return password === '0616';
+  };
+  
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+  };
+
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -196,6 +210,11 @@ const App: React.FC = () => {
     return sortConfig.direction === 'desc' ? bVal - aVal : aVal - bVal;
   });
 
+  // Render Login Screen if not authenticated
+  if (!isAuthenticated) {
+    return <LoginScreen onValidate={validatePassword} onSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className={`min-h-screen ${theme.bg} text-slate-200 font-sans selection:bg-red-500/30 pb-20 transition-colors duration-500`}>
       
@@ -276,25 +295,30 @@ const App: React.FC = () => {
 
           {/* Controls: Type Toggle & Sort */}
           <div className="flex items-center justify-between gap-4">
-             {/* Type Toggle - Solid Buttons per Screenshot */}
+             {/* Type Toggle - Sliding Segmented Control */}
              {!showFavoritesOnly ? (
-               <div className="flex w-full gap-2">
+               <div className="relative flex w-full bg-[#1a1a1a] rounded-md p-1 border border-[#333]">
+                  {/* Sliding Pill */}
+                  <div 
+                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-[4px] shadow-lg transition-all duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] ${
+                      activeTab === 'CALL' 
+                        ? 'translate-x-0 bg-[#ef4444] shadow-[0_2px_10px_rgba(239,68,68,0.4)]' 
+                        : 'translate-x-full bg-[#10b981] shadow-[0_2px_10px_rgba(16,185,129,0.4)]'
+                    }`}
+                  ></div>
+                  
                   <button 
                     onClick={() => setActiveTab('CALL')}
-                    className={`flex-1 py-2 rounded-md font-black text-base tracking-widest transition-all border ${
-                        activeTab === 'CALL' 
-                        ? 'bg-[#ef4444] text-white border-[#ef4444] shadow-[0_4px_20px_rgba(239,68,68,0.3)]' 
-                        : 'bg-[#1a1a1a] text-[#555] border-[#333] hover:border-[#555] hover:text-[#777]'
+                    className={`flex-1 py-1.5 font-black text-base tracking-widest relative z-10 transition-colors duration-300 ${
+                        activeTab === 'CALL' ? 'text-white' : 'text-[#555] hover:text-[#777]'
                     }`}
                   >
                     認購
                   </button>
                   <button 
                     onClick={() => setActiveTab('PUT')}
-                    className={`flex-1 py-2 rounded-md font-black text-base tracking-widest transition-all border ${
-                        activeTab === 'PUT' 
-                        ? 'bg-[#10b981] text-white border-[#10b981] shadow-[0_4px_20px_rgba(16,185,129,0.3)]' 
-                        : 'bg-[#1a1a1a] text-[#555] border-[#333] hover:border-[#555] hover:text-[#777]'
+                    className={`flex-1 py-1.5 font-black text-base tracking-widest relative z-10 transition-colors duration-300 ${
+                        activeTab === 'PUT' ? 'text-white' : 'text-[#555] hover:text-[#777]'
                     }`}
                   >
                     認售
