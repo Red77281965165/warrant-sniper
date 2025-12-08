@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle, RefreshCw } from 'lucide-react';
 import WarrantRow from './components/WarrantRow';
@@ -21,7 +22,9 @@ const App: React.FC = () => {
   
   // Interaction State for Button
   const [isButtonFlashing, setIsButtonFlashing] = useState(false);
-  
+  const [isCooldown, setIsCooldown] = useState(false); // Debounce cooldown
+  const [lastUpdatedTime, setLastUpdatedTime] = useState<Date | null>(null);
+
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const [sortConfig, setSortConfig] = useState<{
@@ -122,7 +125,15 @@ const App: React.FC = () => {
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    
+    if (isCooldown) return;
     if (!searchQuery.trim()) return;
+
+    // Activate cooldown
+    setIsCooldown(true);
+    setTimeout(() => setIsCooldown(false), 500);
+
+    setLastUpdatedTime(new Date());
 
     setIsSearching(true);
     setWarrants([]);
@@ -151,6 +162,11 @@ const App: React.FC = () => {
       return;
     }
 
+    // Debounce for reset action
+    if (isCooldown) return;
+    setIsCooldown(true);
+    setTimeout(() => setIsCooldown(false), 500);
+
     // 2. Otherwise, perform a full soft reset (Home/Clear)
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
@@ -164,6 +180,7 @@ const App: React.FC = () => {
     setActiveTab('CALL');
     setShowFavoritesOnly(false);
     setSelectedWarrant(null);
+    setLastUpdatedTime(null);
   };
 
   const toggleFavorite = (e: React.MouseEvent, warrant: WarrantData) => {
@@ -226,8 +243,11 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
                <div className="relative">
-                 <div className={`absolute inset-0 ${theme.pulse} blur-lg opacity-20 animate-pulse transition-colors duration-500`}></div>
-                 <div className="relative w-10 h-10 bg-gradient-to-br from-slate-800 to-black rounded-lg border border-slate-700 flex items-center justify-center shadow-inner">
+                 {/* Enhanced Breathing Light Effect */}
+                 <div className={`absolute -inset-3 ${theme.pulse} blur-xl opacity-30 animate-pulse transition-colors duration-500`}></div>
+                 <div className={`absolute -inset-1 ${theme.pulse} blur-md opacity-50 animate-pulse transition-colors duration-500`}></div>
+                 
+                 <div className="relative w-10 h-10 bg-gradient-to-br from-slate-800 to-black rounded-lg border border-slate-700 flex items-center justify-center shadow-inner z-10">
                    <Crosshair className={`${theme.primary} transition-colors duration-500`} size={24} />
                  </div>
                </div>
@@ -236,7 +256,10 @@ const App: React.FC = () => {
                    權證<span className={`${theme.primary} transition-colors duration-500`}>狙擊手</span>
                  </h1>
                  <div className="flex items-center gap-1.5">
-                   <span className={`w-1.5 h-1.5 rounded-full ${theme.pulse} animate-pulse transition-colors duration-500`}></span>
+                   <div className="relative flex items-center justify-center">
+                      <span className={`absolute w-3 h-3 rounded-full ${theme.pulse} opacity-60 animate-pulse`}></span>
+                      <span className={`relative w-1.5 h-1.5 rounded-full ${theme.pulse} transition-colors duration-500`}></span>
+                   </div>
                    <p className={`text-[10px] font-bold ${theme.primary} tracking-wider transition-colors duration-500`}>戰術雷達掃描中</p>
                  </div>
                </div>
@@ -259,7 +282,8 @@ const App: React.FC = () => {
 
               <button 
                  onClick={handleRefresh}
-                 className={`p-2.5 bg-slate-900 rounded-lg border border-slate-800 text-slate-500 hover:text-white transition-colors duration-300 hover:border-current hover:${theme.primary}`}
+                 disabled={isCooldown}
+                 className={`p-2.5 bg-slate-900 rounded-lg border border-slate-800 text-slate-500 hover:text-white transition-colors duration-300 hover:border-current hover:${theme.primary} ${isCooldown ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                  <RefreshCw size={20} />
               </button>
@@ -280,13 +304,13 @@ const App: React.FC = () => {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
               <button 
                 type="submit"
-                disabled={isSearching}
+                disabled={isSearching || isCooldown}
                 onClick={triggerButtonFeedback}
                 className={`absolute right-2 top-2 bottom-2 px-4 rounded border text-xs font-bold transition-all duration-100 flex items-center gap-2 ${
                   isButtonFlashing 
                     ? 'bg-red-600 border-red-400 text-white shadow-[0_0_20px_rgba(220,38,38,0.6)] scale-95' 
                     : `${theme.softBg} ${theme.softBorder} ${theme.primary} ${theme.hoverBg}`
-                }`}
+                } ${(isSearching || isCooldown) ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isSearching ? <Loader2 className="animate-spin" size={14} /> : '鎖定'}
               </button>
@@ -333,39 +357,59 @@ const App: React.FC = () => {
 
              {/* Target Info (Right Side) */}
              {currentTarget && !showFavoritesOnly && (
-               <div className="text-right shrink-0">
-                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">目標代號</div>
-                  <div className={`text-xl font-black font-mono leading-none ${theme.primary} transition-colors duration-500`}>{currentTarget}</div>
+               <div className="text-center shrink-0">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">目標名稱</div>
+                  <div className={`text-xl font-black leading-none ${theme.primary} transition-colors duration-500`}>
+                     {warrants.length > 0 ? warrants[0].underlyingName : currentTarget}
+                  </div>
                </div>
              )}
           </div>
           
+          {/* Strategy Advice & Timestamp */}
+          {!showFavoritesOnly && (
+            <div className="mt-3 px-1">
+               <p className="text-[11px] text-zinc-500 font-medium tracking-wide">
+                  建議操作者:請挑選量大、槓桿不高的，才不會選錯。
+               </p>
+            </div>
+          )}
+
           {/* Filter / Sort Bar */}
-          <div className="flex items-center gap-4 mt-4 text-[10px] font-bold text-slate-500 border-t border-slate-800/50 pt-3">
-             <button 
-                onClick={() => handleSort('volume')}
-                className={`flex items-center gap-1 hover:text-white transition-colors ${sortConfig.key === 'volume' ? theme.text : ''}`}
-             >
-                <BarChart3 size={12} />
-                總量
-                {sortConfig.key === 'volume' && <span className="text-[9px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
-             </button>
-             <button 
-                onClick={() => handleSort('effectiveLeverage')}
-                className={`flex items-center gap-1 hover:text-white transition-colors ${sortConfig.key === 'effectiveLeverage' ? theme.text : ''}`}
-             >
-                <Zap size={12} />
-                槓桿
-                {sortConfig.key === 'effectiveLeverage' && <span className="text-[9px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
-             </button>
-             <button 
-                onClick={() => handleSort('thetaPercent')}
-                className={`flex items-center gap-1 hover:text-white transition-colors ${sortConfig.key === 'thetaPercent' ? theme.text : ''}`}
-             >
-                <Clock size={12} />
-                每日利息
-                {sortConfig.key === 'thetaPercent' && <span className="text-[9px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
-             </button>
+          <div className="flex items-center justify-between mt-3 text-[10px] font-bold text-slate-500 border-t border-slate-800/50 pt-3">
+             <div className="flex items-center gap-4">
+               <button 
+                  onClick={() => handleSort('volume')}
+                  className={`flex items-center gap-1 hover:text-white transition-colors ${sortConfig.key === 'volume' ? theme.text : ''}`}
+               >
+                  <BarChart3 size={12} />
+                  總量
+                  {sortConfig.key === 'volume' && <span className="text-[9px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
+               </button>
+               <button 
+                  onClick={() => handleSort('effectiveLeverage')}
+                  className={`flex items-center gap-1 hover:text-white transition-colors ${sortConfig.key === 'effectiveLeverage' ? theme.text : ''}`}
+               >
+                  <Zap size={12} />
+                  槓桿
+                  {sortConfig.key === 'effectiveLeverage' && <span className="text-[9px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
+               </button>
+               <button 
+                  onClick={() => handleSort('thetaPercent')}
+                  className={`flex items-center gap-1 hover:text-white transition-colors ${sortConfig.key === 'thetaPercent' ? theme.text : ''}`}
+               >
+                  <Clock size={12} />
+                  每日利息
+                  {sortConfig.key === 'thetaPercent' && <span className="text-[9px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
+               </button>
+             </div>
+             
+             {/* Timestamp moved here */}
+             {!showFavoritesOnly && lastUpdatedTime && (
+               <span className="text-[10px] text-zinc-600 font-mono">
+                 資料更新時間:{lastUpdatedTime.toLocaleTimeString('zh-TW', { hour12: false })}
+               </span>
+             )}
           </div>
 
         </div>
@@ -416,3 +460,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+    

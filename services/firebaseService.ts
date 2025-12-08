@@ -61,18 +61,51 @@ export const subscribeToSearchCommand = (
           const type = item.type ? (item.type === 'call' ? 'CALL' : 'PUT') : (isCall ? 'CALL' : 'PUT');
           
           // 嘗試從 Python 資料中解析最佳一檔 (如果有提供)
-          // Python keys typically: best_bid, best_ask OR bid, ask, bid_price, ask_price
           const bestBid = Number(item.best_bid) || Number(item.bid) || Number(item.bid_price) || 0;
           const bestAsk = Number(item.best_ask) || Number(item.ask) || Number(item.ask_price) || 0;
           const bestBidVol = Number(item.best_bid_vol) || Number(item.bid_vol) || 0;
           const bestAskVol = Number(item.best_ask_vol) || Number(item.ask_vol) || 0;
+
+          // ---------------------------------------------------------
+          // Logic to determine underlying name (Avoid Numbers/Codes)
+          // ---------------------------------------------------------
+          let uName = data.stock_name || data.stockName || item.stock_name || item.stockName || item.underlying_name;
+
+          // If name is missing or numeric (e.g. "2330"), try to extract from warrant name
+          if ((!uName || /^\d+$/.test(uName)) && item.name) {
+             const nameStr = String(item.name);
+             // Match prefix of non-digits (e.g., "台積電永豐" from "台積電永豐55購07")
+             const match = nameStr.match(/^(\D+)/); 
+             if (match) {
+                const prefix = match[1];
+                // Heuristic: Most broker suffixes are 2 chars (e.g., 凱基, 永豐)
+                // If prefix length >= 4 (e.g. 台積電永豐), strip last 2 chars -> 台積電
+                // This covers most cases: 
+                // 台積電(3)+永豐(2)=5 -> 台積電
+                // 鴻海(2)+富邦(2)=4 -> 鴻海
+                // 中鋼(2)+凱基(2)=4 -> 中鋼
+                if (prefix.length >= 4) {
+                   uName = prefix.slice(0, -2);
+                } else {
+                   // e.g. 友達 (2)? If no broker suffix? Just use prefix.
+                   uName = prefix;
+                }
+             } else {
+                // Name starts with digits (e.g. 0050元大...), use full name as fallback
+                // Better to show "0050元大..." than just "0050"
+                uName = nameStr;
+             }
+          }
+
+          // Absolute fallback
+          if (!uName) uName = data.stock_code || "Unknown";
 
           return {
             id: item.id,
             symbol: item.id,
             name: item.name,
             underlyingSymbol: data.stock_code || "Unknown",
-            underlyingName: data.stock_code || "Unknown", 
+            underlyingName: uName,
             broker: item.broker || "N/A", 
             type: type,
             

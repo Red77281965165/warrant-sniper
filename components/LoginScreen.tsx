@@ -309,6 +309,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
         </div>
       </div>
       
+      {/* Version Indicator */}
+      <div className="absolute bottom-2 right-2 text-[8px] text-zinc-800 font-mono select-none">
+         v122.0
+      </div>
+
       <style>{`
         @keyframes scan {
           0% { transform: translateY(-100%); }
