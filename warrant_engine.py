@@ -29,12 +29,13 @@ SJ_SECRET_KEY = "EHdBKPXyC2h3gpJmHr9UbYtsqup7aREAyn1sLDnb3mCK"
 STRATEGY_CONFIG = {
     "EXCLUDE_BROKER": "統一",  # 排除的券商關鍵字
     "MIN_DAYS_LEFT": 90,       # 最小剩餘天數
-    "MIN_LEVERAGE": 3.0,       # 最小實質槓桿
+    "MIN_LEVERAGE": 2.5,       # 最小實質槓桿
     "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
     "MAX_THETA_PCT": 3.0,      # 最大每日利息% (絕對值)
     "MIN_VOLUME": 10,           # 最小成交量
     "MIN_PRICE": 0.25,          # 最低價
-    "MAX_PRICE": 3.0          # 最高價
+    "MAX_PRICE": 3.0,           # 最高價
+    "MAX_SPREAD": 0.03          # [新增] 最大容許買賣價差
 }
 
 # 已知券商列表
@@ -44,7 +45,7 @@ KNOWN_BROKERS = [
     "國票", "永昌", "亞東"
 ]
 
-print("⚡ 正在啟動權證戰情室 (v2025.9 委買張數修復版)...")
+print("⚡ 正在啟動權證戰情室 (v2025.10 價差監控版)...")
 
 # ==========================================
 # 1. 初始化與 CSV 資料載入
@@ -259,12 +260,19 @@ def process_search(query_text):
             best_bid = float(snap.buy_price)   # 最佳委買價
             best_ask = float(snap.sell_price)  # 最佳委賣價
             last_price = float(snap.close)     # 最新成交價
+            best_bid_vol = int(snap.buy_volume) 
+            best_ask_vol = int(snap.sell_volume) 
             
-            # 新增：抓取最佳五檔的第一檔張數 (Best Bid/Ask Volume)
-            best_bid_vol = int(snap.buy_volume) # 最佳委買量
-            best_ask_vol = int(snap.sell_volume) # 最佳委賣量
-            
-            # 定義「市價 (Market Price)」邏輯： Ask > Last > Bid
+            # === [新增] 價差檢查邏輯 ===
+            # 如果買賣雙方都有報價，計算價差
+            if best_ask > 0 and best_bid > 0:
+                spread = best_ask - best_bid
+                # 如果價差超過設定值 (例如 0.03)，直接跳過
+                if spread > STRATEGY_CONFIG["MAX_SPREAD"]:
+                    continue
+            # =========================
+
+            # 定義「市價 (Market Price)」
             if best_ask > 0:
                 market_price = best_ask
             elif last_price > 0:
@@ -315,11 +323,7 @@ def process_search(query_text):
 
                             theta_cost_dollar = (theta_annual / 365.0) * multiplier
                             
-                            # --- 【Theta 計算修改】 ---
-                            # 使用最佳委買 (Best Bid) 計算每日利息佔比
-                            # 邏輯：如果你持有它，每天會依據「變現價格(Bid)」損失多少比例
                             calc_base = best_bid if best_bid > 0 else market_price
-                            
                             if calc_base > 0:
                                 theta_pct = (theta_cost_dollar / calc_base) * 100
                             
@@ -334,16 +338,16 @@ def process_search(query_text):
                                     broker_name = b
                                     break
                             
-                            # --- 【回傳資料區】 ---
                             valid_results.append({
                                 "id": c.code,
                                 "name": c.name,
                                 "price": round(float(market_price), 2),
                                 "bid": round(float(best_bid), 2),
                                 "ask": round(float(best_ask), 2),
-                                "bid_vol": int(best_bid_vol), # 新增：委買張數
-                                "ask_vol": int(best_ask_vol), # 新增：委賣張數
-                                "volume": int(volume),        # 這是總成交量
+                                "spread": round(best_ask - best_bid, 2) if (best_ask>0 and best_bid>0) else 0, # 可選：回傳價差
+                                "bid_vol": int(best_bid_vol), 
+                                "ask_vol": int(best_ask_vol), 
+                                "volume": int(volume),
                                 "lev": round(effective_leverage, 2),
                                 "theta_pct": round(theta_pct, 2),
                                 "days": days_left,
