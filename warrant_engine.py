@@ -32,10 +32,10 @@ STRATEGY_CONFIG = {
     "MIN_LEVERAGE": 2.5,       # 最小實質槓桿
     "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
     "MAX_THETA_PCT": 3.0,      # 最大每日利息% (絕對值)
-    "MIN_VOLUME": 10,           # 最小成交量
-    "MIN_PRICE": 0.25,          # 最低價
-    "MAX_PRICE": 3.0,           # 最高價
-    "MAX_SPREAD": 0.03          # [新增] 最大容許買賣價差
+    "MIN_VOLUME": 10,          # 最小成交量
+    "MIN_PRICE": 0.25,         # 最低價
+    "MAX_PRICE": 3.0,          # 最高價
+    "MAX_SPREAD": 0.03         # 最大容許買賣價差
 }
 
 # 已知券商列表
@@ -45,7 +45,7 @@ KNOWN_BROKERS = [
     "國票", "永昌", "亞東"
 ]
 
-print("⚡ 正在啟動權證戰情室 (v2025.10 價差監控版)...")
+print("⚡ 正在啟動權證戰情室 (v2025.11 交易日精準版)...")
 
 # ==========================================
 # 1. 初始化與 CSV 資料載入
@@ -62,6 +62,7 @@ def load_csv_data():
 
     try:
         df = pd.read_csv(filename, dtype=str)
+        # 移除逗號並轉數值
         df['履約價格'] = pd.to_numeric(df['履約價格'].str.replace(',', ''), errors='coerce')
         df['行使比例'] = pd.to_numeric(df['行使比例'].str.replace(',', ''), errors='coerce')
         
@@ -74,6 +75,7 @@ def load_csv_data():
             elif '購' in name: w_type = 'call'
             
             raw_date = str(row['到期日']).strip()
+            # 民國轉西元處理
             if len(raw_date) == 7:
                 raw_date = str(int(raw_date[:3]) + 1911) + raw_date[3:]
             
@@ -120,46 +122,79 @@ except Exception as e:
 load_csv_data()
 
 # ==========================================
-# 2. 金融工程核心
+# 2. 金融工程核心 (修正為交易日 Theta)
 # ==========================================
 class FinancialEngine:
     @staticmethod
     def bs_price(sigma, S, K, T, r, option_type='call'):
+        """標準 Black-Scholes 定價模型"""
         try:
-            if T <= 0: return 0
+            if T <= 0: return max(0, S - K) if option_type == 'call' else max(0, K - S)
+            # 避免波動率過低導致除以零
+            if sigma <= 0.0001: return max(0, S - K) if option_type == 'call' else max(0, K - S)
+            
             d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
             d2 = d1 - sigma * np.sqrt(T)
+            
             if option_type == 'call':
                 return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
             else:
                 return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-        except: return 0
+        except:
+            return 0
 
     @staticmethod
     def implied_volatility(price, S, K, T, r, option_type='call'):
+        """反推隱含波動率 (IV)"""
         try:
             intrinsic = max(0, S - K) if option_type == 'call' else max(0, K - S)
-            if price <= intrinsic: return np.nan 
-            return brentq(lambda x: FinancialEngine.bs_price(x, S, K, T, r, option_type) - price, 0.001, 5.0)
-        except: return np.nan
+            # 如果市價低於內含價值，IV 無解 (或極小)，回傳 NaN
+            if price <= intrinsic + 0.001: return np.nan 
+            
+            # 使用 Brent 方法求解，範圍設在 1% ~ 500% 波動率之間
+            def objective(sigma):
+                return FinancialEngine.bs_price(sigma, S, K, T, r, option_type) - price
+            
+            return brentq(objective, 0.01, 5.0)
+        except:
+            return np.nan
 
     @staticmethod
-    def calculate_greeks(S, K, T, r, sigma, option_type='call'):
+    def calculate_greeks_numerical(S, K, T, r, sigma, option_type='call'):
+        """
+        使用【數值差分法】計算 Greeks
+        修正：將時間步長 (dt) 改為 1/252，以符合台灣券商「交易日 Theta」的慣例。
+        這樣算出來的每日利息會跟凱基、元大等券商顯示的數值一致。
+        """
         try:
             if sigma <= 0 or T <= 0: return 0, 0
-            d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-            d2 = d1 - sigma * np.sqrt(T)
             
-            if option_type == 'call': delta = norm.cdf(d1)
-            else: delta = norm.cdf(d1) - 1
-                
-            term1 = -(S * norm.pdf(d1) * sigma) / (2 * np.sqrt(T))
-            if option_type == 'call':
-                theta = term1 - r * K * np.exp(-r * T) * norm.cdf(d2)
+            # 1. 計算目前的理論價格
+            price_now = FinancialEngine.bs_price(sigma, S, K, T, r, option_type)
+            
+            # 2. 計算 Delta (股價變動微小量後的價格變化)
+            dS = S * 0.001 
+            price_bump_s = FinancialEngine.bs_price(sigma, S + dS, K, T, r, option_type)
+            delta = (price_bump_s - price_now) / dS
+            
+            # 3. 計算 Theta (時間經過「一個交易日」後的價格變化)
+            # [關鍵修正] 使用 1/252 (交易日) 而非 1/365 (日曆日)
+            # 這代表「下一個開盤日」你會損失多少錢
+            dt = 1.0 / 252.0 
+            
+            T_tomorrow = T - dt
+            
+            if T_tomorrow <= 0:
+                # 為了避免 T 變負數的邊界狀況
+                theta_dollar = -price_now 
             else:
-                theta = term1 + r * K * np.exp(-r * T) * norm.cdf(-d2)
-            return delta, theta
-        except: return 0, 0
+                price_tomorrow = FinancialEngine.bs_price(sigma, S, K, T_tomorrow, r, option_type)
+                theta_dollar = price_tomorrow - price_now 
+            
+            return delta, theta_dollar
+
+        except Exception as e:
+            return 0, 0
 
 # ==========================================
 # 3. 索引建立
@@ -187,7 +222,8 @@ def build_contract_index():
 def process_search(query_text):
     print(f"\n🔔 [Firebase] 收到搜尋請求：{query_text}")
     
-    query_str = str(query_text).strip()
+    query_str = str(query_text).strip().replace("*", "")
+    
     mother_name = query_str
     mother_code = None
 
@@ -205,7 +241,7 @@ def process_search(query_text):
                 break
     
     if not mother_code:
-        print("   ❌ 找不到此股票代號")
+        print(f"   ❌ 找不到此股票代號: {query_str}")
         return []
 
     print(f"   🔍 正在抓取標的 ({mother_name}) 即時報價...")
@@ -224,7 +260,8 @@ def process_search(query_text):
         print("   ⚠️ 標的無價格，無法計算。")
         return []
 
-    search_name = mother_name.replace("-KY", "").replace("KY", "").strip()
+    # 濾掉 KY 與 星號
+    search_name = mother_name.replace("-KY", "").replace("KY", "").replace("*", "").strip()
 
     target_warrants = []
     for w in ALL_WARRANTS:
@@ -263,14 +300,11 @@ def process_search(query_text):
             best_bid_vol = int(snap.buy_volume) 
             best_ask_vol = int(snap.sell_volume) 
             
-            # === [新增] 價差檢查邏輯 ===
-            # 如果買賣雙方都有報價，計算價差
+            # 價差檢查
             if best_ask > 0 and best_bid > 0:
                 spread = best_ask - best_bid
-                # 如果價差超過設定值 (例如 0.03)，直接跳過
                 if spread > STRATEGY_CONFIG["MAX_SPREAD"]:
                     continue
-            # =========================
 
             # 定義「市價 (Market Price)」
             if best_ask > 0:
@@ -282,8 +316,7 @@ def process_search(query_text):
             else:
                 continue 
             
-            volume = snap.total_volume # 這是當日總成交量
-            # --- ---------------- ---
+            volume = snap.total_volume 
             
             if volume < STRATEGY_CONFIG["MIN_VOLUME"]: continue
             if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
@@ -308,24 +341,35 @@ def process_search(query_text):
                     
                     if days_left > 0:
                         T = days_left / 365.0
-                        r_rate = 0.015 
+                        r_rate = 0.016 
                         
+                        # 1. 將市價還原為「1單位 Option」的價格
                         opt_price_per_share = market_price / multiplier if multiplier > 0 else market_price
                         
+                        # 2. 計算隱含波動率 (IV)
                         iv = FinancialEngine.implied_volatility(opt_price_per_share, mother_price, strike, T, r_rate, w_type)
                         
                         if not np.isnan(iv):
-                            delta, theta_annual = FinancialEngine.calculate_greeks(mother_price, strike, T, r_rate, iv, w_type)
-                            effective_leverage = (mother_price * abs(delta) * multiplier) / market_price
+                            # 3. 使用數值法計算 Greeks (使用 1/252 步長)
+                            delta_unit, theta_unit_dollar = FinancialEngine.calculate_greeks_numerical(
+                                mother_price, strike, T, r_rate, iv, w_type
+                            )
+                            
+                            # 4. 將 Greeks 轉換回這檔權證的規格
+                            
+                            # 實質槓桿 = (標的股價 * Delta * 行使比例) / 權證價格
+                            effective_leverage = (mother_price * abs(delta_unit) * multiplier) / market_price
                             
                             if effective_leverage < STRATEGY_CONFIG["MIN_LEVERAGE"] or effective_leverage > STRATEGY_CONFIG["MAX_LEVERAGE"]:
                                 continue
 
-                            theta_cost_dollar = (theta_annual / 365.0) * multiplier
+                            # 權證每日利息(元) = 單單位 Theta * 行使比例
+                            warrant_theta_dollar = theta_unit_dollar * multiplier
                             
+                            # 計算 Theta % (每日流失百分比)
                             calc_base = best_bid if best_bid > 0 else market_price
                             if calc_base > 0:
-                                theta_pct = (theta_cost_dollar / calc_base) * 100
+                                theta_pct = (abs(warrant_theta_dollar) / calc_base) * 100
                             
                             if abs(theta_pct) > STRATEGY_CONFIG["MAX_THETA_PCT"]:
                                 continue
@@ -344,18 +388,18 @@ def process_search(query_text):
                                 "price": round(float(market_price), 2),
                                 "bid": round(float(best_bid), 2),
                                 "ask": round(float(best_ask), 2),
-                                "spread": round(best_ask - best_bid, 2) if (best_ask>0 and best_bid>0) else 0, # 可選：回傳價差
+                                "spread": round(best_ask - best_bid, 2) if (best_ask>0 and best_bid>0) else 0, 
                                 "bid_vol": int(best_bid_vol), 
                                 "ask_vol": int(best_ask_vol), 
                                 "volume": int(volume),
                                 "lev": round(effective_leverage, 2),
-                                "theta_pct": round(theta_pct, 2),
+                                "theta_pct": round(theta_pct, 3), 
                                 "days": days_left,
                                 "strike": strike,
                                 "iv": iv_display,
                                 "broker": broker_name,
                             })
-                except Exception:
+                except Exception as e:
                     pass
 
     valid_results.sort(key=lambda x: x['volume'], reverse=True)
