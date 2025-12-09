@@ -300,7 +300,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
 
            <div className="border-t border-red-900/10 pt-4 mx-auto max-w-[280px]">
                <p className="text-[10px] text-zinc-600 leading-relaxed font-medium mb-2">
-                  <span className="text-red-900">免責聲明:</span> 本程式除總量相關問題尚未排除，槓桿、利息、價格均準確無誤，如有修改建議請聯繫開發者，也請使用者請謹慎下單，出事了開發者決不負責。
+                  <span className="text-red-900">免責聲明:</span> 本程式除總量相關問題尚未排除，槓桿、利息、價格均準確無誤，如有修改建議請聯繫開發者，也請使用者謹慎下單，出事了開發者決不負責。
                </p>
                <p className="text-[10px] text-zinc-600 leading-relaxed font-medium mt-4">
                   如通行證忘記，請聯繫開發者索取通行證
