@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle, RefreshCw, Info, ShieldAlert } from 'lucide-react';
 import WarrantRow from './components/WarrantRow';
 import WarrantModal from './components/WarrantModal';
 import LoginScreen from './components/LoginScreen';
@@ -24,6 +24,9 @@ const App: React.FC = () => {
   const [isButtonFlashing, setIsButtonFlashing] = useState(false);
   const [isCooldown, setIsCooldown] = useState(false); // Debounce cooldown
   const [lastUpdatedTime, setLastUpdatedTime] = useState<Date | null>(null);
+
+  // Info Modal State
+  const [showInfoModal, setShowInfoModal] = useState(false);
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -216,7 +219,37 @@ const App: React.FC = () => {
   const filteredWarrants = warrants
     .filter(w => {
         if (showFavoritesOnly) return true;
-        return w.type === activeTab;
+        
+        // Basic Type Check
+        if (w.type !== activeTab) return false;
+
+        // --- STRICT FILTERING RULES ---
+        
+        // 1. 排除券商: 統一
+        if (w.broker && w.broker.includes('統一')) return false;
+
+        // 2. 最小剩餘天數: 90天
+        if (w.daysToMaturity < 90) return false;
+
+        // 3. 槓桿倍數: 2.5倍 ~ 9倍
+        if (w.effectiveLeverage < 2.5 || w.effectiveLeverage > 9) return false;
+
+        // 4. 每日最大利息: 2.5% (Absolute value)
+        if (Math.abs(w.thetaPercent) > 2.5) return false;
+
+        // 5. 最小成交量: 10張
+        if (w.volume < 10) return false;
+
+        // 6. 價格上下限: 0.25元 ~ 3.0元
+        if (w.price < 0.25 || w.price > 3.0) return false;
+
+        // 7. 最大容許買賣價差: 0.03元
+        if (w.bestAskPrice > 0 && w.bestBidPrice > 0) {
+           const spread = w.bestAskPrice - w.bestBidPrice;
+           if (spread > 0.03) return false;
+        }
+
+        return true;
     });
 
   const displayWarrants = showFavoritesOnly ? savedWarrants : filteredWarrants;
@@ -252,9 +285,17 @@ const App: React.FC = () => {
                  </div>
                </div>
                <div>
-                 <h1 className="text-xl font-black italic tracking-tighter text-white">
-                   權證<span className={`${theme.primary} transition-colors duration-500`}>狙擊手</span>
-                 </h1>
+                 <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-black italic tracking-tighter text-white">
+                      權證<span className={`${theme.primary} transition-colors duration-500`}>狙擊手</span>
+                    </h1>
+                    <button 
+                        onClick={() => setShowInfoModal(true)}
+                        className={`p-2 rounded-full text-slate-500 hover:text-white hover:bg-white/10 transition-all`}
+                    >
+                        <Info size={24} />
+                    </button>
+                 </div>
                  <div className="flex items-center gap-1.5">
                    <div className="relative flex items-center justify-center">
                       <span className={`absolute w-3 h-3 rounded-full ${theme.pulse} opacity-60 animate-pulse`}></span>
@@ -366,15 +407,6 @@ const App: React.FC = () => {
              )}
           </div>
           
-          {/* Strategy Advice & Timestamp */}
-          {!showFavoritesOnly && (
-            <div className="mt-3 px-1">
-               <p className="text-[11px] text-zinc-500 font-medium tracking-wide">
-                  建議操作者:請挑選量大、槓桿不高的，才不會選錯。
-               </p>
-            </div>
-          )}
-
           {/* Filter / Sort Bar */}
           <div className="flex items-center justify-between mt-3 text-[10px] font-bold text-slate-500 border-t border-slate-800/50 pt-3">
              <div className="flex items-center gap-4">
@@ -424,11 +456,46 @@ const App: React.FC = () => {
                   <Loader2 className={`animate-spin ${theme.primary}`} size={32} />
                   <p className="text-sm font-mono text-slate-500">掃描市場數據中...</p>
                </div>
+            ) : showFavoritesOnly ? (
+               <div className="flex flex-col items-center gap-3">
+                  <Star className="text-slate-700" size={48} />
+                  <p className="text-sm text-slate-600 font-bold tracking-wider">尚未加入自選權證</p>
+               </div>
+            ) : currentTarget ? (
+               <div className="flex flex-col items-center justify-center py-8 animate-in fade-in zoom-in duration-300">
+                   <div className="relative mb-6">
+                       <div className="absolute inset-0 bg-red-500/10 blur-2xl rounded-full"></div>
+                       <div className="relative p-6 bg-[#111] rounded-full border border-slate-800 shadow-2xl">
+                           <Target className="text-slate-600 opacity-50" size={48} />
+                           <div className="absolute inset-0 flex items-center justify-center">
+                               <X className="text-red-900/50 w-full h-full p-2" />
+                           </div>
+                       </div>
+                   </div>
+                   
+                   <h3 className="text-xl font-black text-slate-300 tracking-[0.2em] mb-3 uppercase drop-shadow-lg">
+                       無符合戰術
+                   </h3>
+                   
+                   <div className="flex items-center gap-2 px-4 py-2 bg-red-950/20 border border-red-900/20 rounded text-red-500/80">
+                       <ShieldAlert size={14} />
+                       <p className="text-xs font-bold tracking-wide">
+                           目前篩選條件下找不到權證
+                       </p>
+                   </div>
+
+                   <button 
+                       onClick={() => setShowInfoModal(true)}
+                       className="mt-6 text-[10px] text-slate-500 underline decoration-slate-700 underline-offset-4 hover:text-slate-300 transition-colors"
+                   >
+                       查看當前篩選規則
+                   </button>
+               </div>
             ) : (
                <div className="flex flex-col items-center gap-3">
                   <Radar className="text-slate-700" size={48} />
-                  <p className="text-sm text-slate-600">
-                    {showFavoritesOnly ? '尚未加入自選權證' : '等待目標進入射程. . . '}
+                  <p className="text-sm text-slate-600 font-bold tracking-wider">
+                    等待目標進入射程. . . 
                   </p>
                </div>
             )}
@@ -455,9 +522,81 @@ const App: React.FC = () => {
         onToggleFavorite={(e) => selectedWarrant && toggleFavorite(e, selectedWarrant)}
       />
 
+      {/* Info / Strategy Modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="absolute inset-0 bg-black/90 backdrop-blur-sm" onClick={() => setShowInfoModal(false)} />
+            <div className={`relative w-full max-w-sm bg-[#0e0e0e] border ${theme.border} rounded-lg shadow-2xl p-6 overflow-hidden`}>
+                
+                {/* Header */}
+                <h3 className="text-lg font-black text-white mb-5 flex items-center gap-2 tracking-wide">
+                    <Target size={20} className={theme.primary} />
+                    篩選策略說明
+                </h3>
+
+                {/* Content */}
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                        <div className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest shrink-0">
+                            <Shield size={12} />
+                            <span>嚴格篩選條件 Active</span>
+                        </div>
+                        <p className="text-[9px] text-red-400 font-medium text-right leading-tight max-w-[160px]">
+                            如查詢後無結果<br/>就代表"無"良好權證可供操作。
+                        </p>
+                    </div>
+                    
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">排除券商</span>
+                            <span className="text-red-400 font-mono font-bold text-sm">統一</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">剩餘天數</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">≥ 90 天</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">槓桿倍數</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">2.5x ~ 9.0x</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">每日利息</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">≤ 2.5%</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">成交總量</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">≥ 10 張</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">價格區間</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">0.25 ~ 3.00 元</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
+                            <span className="text-slate-400 text-sm font-medium">買賣價差</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">≤ 0.03 元</span>
+                        </div>
+                    </div>
+
+                    <div className={`p-3 rounded border mt-4 text-xs leading-relaxed ${theme.softBg} ${theme.softBorder} text-slate-300`}>
+                       <p className="flex gap-2">
+                         <span className="shrink-0">💡</span>
+                         <span>符合上述條件之權證將自動顯示，未達標者隱藏。</span>
+                       </p>
+                    </div>
+                </div>
+
+                <button 
+                    onClick={() => setShowInfoModal(false)}
+                    className="mt-6 w-full py-3 bg-slate-100 text-black font-black tracking-widest rounded-lg hover:bg-white transition-colors"
+                >
+                    了解
+                </button>
+            </div>
+        </div>
+      )}
+
     </div>
   );
 };
 
 export default App;
-    

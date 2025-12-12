@@ -24,15 +24,15 @@ SJ_API_KEY = "4QXJ3FiGFtzR5WvXtf9Tt41xg6dog6VfhZ5qZy6fiMiy"
 SJ_SECRET_KEY = "EHdBKPXyC2h3gpJmHr9UbYtsqup7aREAyn1sLDnb3mCK"
 
 # ==========================================
-# 策略篩選設定
+# 策略篩選設定 (已移除 MIN_BID_VOL)
 # ==========================================
 STRATEGY_CONFIG = {
     "EXCLUDE_BROKER": "統一",  # 排除的券商關鍵字
     "MIN_DAYS_LEFT": 90,       # 最小剩餘天數
     "MIN_LEVERAGE": 2.5,       # 最小實質槓桿
     "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
-    "MAX_THETA_PCT": 3.0,      # 最大每日利息% (絕對值)
-    "MIN_VOLUME": 10,          # 最小成交量
+    "MAX_THETA_PCT": 2.5,      # 最大每日利息% (絕對值)
+    "MIN_VOLUME": 10,          # 最小總成交量
     "MIN_PRICE": 0.25,         # 最低價
     "MAX_PRICE": 3.0,          # 最高價
     "MAX_SPREAD": 0.03         # 最大容許買賣價差
@@ -45,7 +45,7 @@ KNOWN_BROKERS = [
     "國票", "永昌", "亞東"
 ]
 
-print("⚡ 正在啟動權證戰情室 (v2025.11 交易日精準版)...")
+print("⚡ 正在啟動權證戰情室 (v2025.12 向量光速版 - 無掛單限制)...")
 
 # ==========================================
 # 1. 初始化與 CSV 資料載入
@@ -62,7 +62,6 @@ def load_csv_data():
 
     try:
         df = pd.read_csv(filename, dtype=str)
-        # 移除逗號並轉數值
         df['履約價格'] = pd.to_numeric(df['履約價格'].str.replace(',', ''), errors='coerce')
         df['行使比例'] = pd.to_numeric(df['行使比例'].str.replace(',', ''), errors='coerce')
         
@@ -75,7 +74,6 @@ def load_csv_data():
             elif '購' in name: w_type = 'call'
             
             raw_date = str(row['到期日']).strip()
-            # 民國轉西元處理
             if len(raw_date) == 7:
                 raw_date = str(int(raw_date[:3]) + 1911) + raw_date[3:]
             
@@ -122,15 +120,14 @@ except Exception as e:
 load_csv_data()
 
 # ==========================================
-# 2. 金融工程核心 (修正為交易日 Theta)
+# 2. 金融工程核心 (向量化極速引擎)
 # ==========================================
-class FinancialEngine:
+class VectorizedEngine:
     @staticmethod
-    def bs_price(sigma, S, K, T, r, option_type='call'):
-        """標準 Black-Scholes 定價模型"""
+    def bs_price_scalar(sigma, S, K, T, r, option_type='call'):
+        """單筆計算 BS 價格 (用於反推 IV 的迴圈中)"""
         try:
             if T <= 0: return max(0, S - K) if option_type == 'call' else max(0, K - S)
-            # 避免波動率過低導致除以零
             if sigma <= 0.0001: return max(0, S - K) if option_type == 'call' else max(0, K - S)
             
             d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -144,57 +141,56 @@ class FinancialEngine:
             return 0
 
     @staticmethod
-    def implied_volatility(price, S, K, T, r, option_type='call'):
-        """反推隱含波動率 (IV)"""
+    def implied_volatility_scalar(price, S, K, T, r, option_type='call'):
+        """反推隱含波動率 (Scalar)"""
         try:
             intrinsic = max(0, S - K) if option_type == 'call' else max(0, K - S)
-            # 如果市價低於內含價值，IV 無解 (或極小)，回傳 NaN
-            if price <= intrinsic + 0.001: return np.nan 
+            if price <= intrinsic + 0.001: return np.nan
             
-            # 使用 Brent 方法求解，範圍設在 1% ~ 500% 波動率之間
             def objective(sigma):
-                return FinancialEngine.bs_price(sigma, S, K, T, r, option_type) - price
+                return VectorizedEngine.bs_price_scalar(sigma, S, K, T, r, option_type) - price
             
             return brentq(objective, 0.01, 5.0)
         except:
             return np.nan
 
     @staticmethod
-    def calculate_greeks_numerical(S, K, T, r, sigma, option_type='call'):
+    def calculate_greeks_analytical_batch(S_arr, K_arr, T_arr, r, sigma_arr, types_arr):
         """
-        使用【數值差分法】計算 Greeks
-        修正：將時間步長 (dt) 改為 1/252，以符合台灣券商「交易日 Theta」的慣例。
-        這樣算出來的每日利息會跟凱基、元大等券商顯示的數值一致。
+        【核心加速區】使用解析解公式一次計算所有 Greeks
+        包含 Delta, Gamma (未輸出), Theta (年化)
         """
-        try:
-            if sigma <= 0 or T <= 0: return 0, 0
-            
-            # 1. 計算目前的理論價格
-            price_now = FinancialEngine.bs_price(sigma, S, K, T, r, option_type)
-            
-            # 2. 計算 Delta (股價變動微小量後的價格變化)
-            dS = S * 0.001 
-            price_bump_s = FinancialEngine.bs_price(sigma, S + dS, K, T, r, option_type)
-            delta = (price_bump_s - price_now) / dS
-            
-            # 3. 計算 Theta (時間經過「一個交易日」後的價格變化)
-            # [關鍵修正] 使用 1/252 (交易日) 而非 1/365 (日曆日)
-            # 這代表「下一個開盤日」你會損失多少錢
-            dt = 1.0 / 252.0 
-            
-            T_tomorrow = T - dt
-            
-            if T_tomorrow <= 0:
-                # 為了避免 T 變負數的邊界狀況
-                theta_dollar = -price_now 
-            else:
-                price_tomorrow = FinancialEngine.bs_price(sigma, S, K, T_tomorrow, r, option_type)
-                theta_dollar = price_tomorrow - price_now 
-            
-            return delta, theta_dollar
-
-        except Exception as e:
-            return 0, 0
+        # 避免除以零
+        sigma_arr = np.maximum(sigma_arr, 0.0001)
+        T_arr = np.maximum(T_arr, 0.00001)
+        
+        d1 = (np.log(S_arr / K_arr) + (r + 0.5 * sigma_arr ** 2) * T_arr) / (sigma_arr * np.sqrt(T_arr))
+        d2 = d1 - sigma_arr * np.sqrt(T_arr)
+        
+        # 預先計算 PDF 和 CDF
+        pdf_d1 = norm.pdf(d1)
+        cdf_d1 = norm.cdf(d1)
+        cdf_minus_d1 = norm.cdf(-d1)
+        cdf_minus_d2 = norm.cdf(-d2)
+        cdf_d2 = norm.cdf(d2) # 用於 Call Theta
+        
+        # --- Delta 計算 ---
+        # Call Delta = N(d1), Put Delta = N(d1) - 1
+        delta_calls = cdf_d1
+        delta_puts = cdf_d1 - 1.0
+        deltas = np.where(types_arr == 'call', delta_calls, delta_puts)
+        
+        # --- Theta 計算 (解析解) ---
+        # 這是年化 Theta (Annual Theta)，稍後需要除以 252 或 365 換算成日
+        # 通用項
+        term1 = -(S_arr * sigma_arr * pdf_d1) / (2 * np.sqrt(T_arr))
+        
+        theta_calls = term1 - r * K_arr * np.exp(-r * T_arr) * cdf_d2
+        theta_puts = term1 + r * K_arr * np.exp(-r * T_arr) * cdf_minus_d2
+        
+        thetas_annual = np.where(types_arr == 'call', theta_calls, theta_puts)
+        
+        return deltas, thetas_annual
 
 # ==========================================
 # 3. 索引建立
@@ -217,7 +213,7 @@ def build_contract_index():
     print(f"🗺️ 索引完成！含 {len(ALL_WARRANTS)} 檔有效權證。")
 
 # ==========================================
-# 4. 搜尋與運算主邏輯
+# 4. 搜尋與運算主邏輯 (優化版)
 # ==========================================
 def process_search(query_text):
     print(f"\n🔔 [Firebase] 收到搜尋請求：{query_text}")
@@ -256,12 +252,13 @@ def process_search(query_text):
     except Exception as e:
         print(f"   ❌ 標的報價抓取錯誤: {e}")
 
-    if mother_price == 0:
+    if mother_price <= 0:
         print("   ⚠️ 標的無價格，無法計算。")
         return []
 
-    # 濾掉 KY 與 星號
-    search_name = mother_name.replace("-KY", "").replace("KY", "").replace("*", "").strip()
+    search_name = mother_name.replace("-KY", "").replace("KY", "").replace("*", "")
+    search_name = search_name.replace("投控", "").replace("控股", "").replace("-DR", "")
+    search_name = search_name.strip()
 
     target_warrants = []
     for w in ALL_WARRANTS:
@@ -271,19 +268,23 @@ def process_search(query_text):
             target_warrants.append(w)
         
     if not target_warrants:
-        print(f"   ⚠️ 找不到權證 (關鍵字: {search_name})")
+        print(f"   ⚠️ 找不到權證 (過濾後: {search_name})")
         return []
 
-    print(f"   📋 初步鎖定 {len(target_warrants)} 檔權證，進行計算與篩選...")
+    print(f"   📋 初步鎖定 {len(target_warrants)} 檔權證，進行光速運算...")
 
-    chunk_size = 200
-    valid_results = []
+    # --- 階段一：批次抓取與基礎過濾 ---
+    valid_candidates = []
     
+    # 分批抓取 Snapshot
+    chunk_size = 200
     for i in range(0, len(target_warrants), chunk_size):
         chunk = target_warrants[i:i+chunk_size]
         try:
             snapshots = api.snapshots(chunk)
-        except: continue
+        except Exception as e:
+            print(f"⚠️ API Snapshot 錯誤: {e}")
+            continue
         
         snap_map = {s.code: s for s in snapshots}
         
@@ -293,123 +294,146 @@ def process_search(query_text):
             
             snap = snap_map[c.code]
             
-            # --- 【報價與張數抓取】 ---
-            best_bid = float(snap.buy_price)   # 最佳委買價
-            best_ask = float(snap.sell_price)  # 最佳委賣價
-            last_price = float(snap.close)     # 最新成交價
-            best_bid_vol = int(snap.buy_volume) 
-            best_ask_vol = int(snap.sell_volume) 
-            
-            # 價差檢查
-            if best_ask > 0 and best_bid > 0:
-                spread = best_ask - best_bid
-                if spread > STRATEGY_CONFIG["MAX_SPREAD"]:
-                    continue
+            try:
+                best_bid = float(snap.buy_price)
+                best_ask = float(snap.sell_price)
+                last_price = float(snap.close)
+                best_bid_vol = int(snap.buy_volume)
+                best_ask_vol = int(snap.sell_volume)
+                volume = int(snap.total_volume)
+                
+                # 1. 價差過濾
+                if best_ask > 0 and best_bid > 0:
+                    spread = best_ask - best_bid
+                    if spread > STRATEGY_CONFIG["MAX_SPREAD"]: continue
+                
+                # 2. 定義市價
+                if best_ask > 0: market_price = best_ask
+                elif last_price > 0: market_price = last_price
+                elif best_bid > 0: market_price = best_bid
+                else: continue
+                
+                # 3. 量能過濾 (只保留總量篩選，移除買一量篩選)
+                if volume < STRATEGY_CONFIG["MIN_VOLUME"]: continue
+                # if best_bid_vol < STRATEGY_CONFIG["MIN_BID_VOL"]: continue # <-- 已移除
 
-            # 定義「市價 (Market Price)」
-            if best_ask > 0:
-                market_price = best_ask
-            elif last_price > 0:
-                market_price = last_price
-            elif best_bid > 0:
-                market_price = best_bid
-            else:
-                continue 
-            
-            volume = snap.total_volume 
-            
-            if volume < STRATEGY_CONFIG["MIN_VOLUME"]: continue
-            if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
+                if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
 
-            specs = CACHE_SPECS[c.code]
-            strike = specs['strike_price']
-            multiplier = specs['multiplier']
-            maturity_date_str = specs['maturity_date']
-            w_type = specs['type']
+                # 4. 時間過濾
+                specs = CACHE_SPECS[c.code]
+                m_date = datetime.datetime.strptime(specs['maturity_date'], "%Y-%m-%d").date()
+                days_left = (m_date - datetime.date.today()).days
+                
+                if days_left < STRATEGY_CONFIG["MIN_DAYS_LEFT"]: continue
+                
+                # 收集有效數據到列表
+                valid_candidates.append({
+                    "contract": c,
+                    "market_price": market_price,
+                    "strike": specs['strike_price'],
+                    "multiplier": specs['multiplier'],
+                    "days_left": days_left,
+                    "type": specs['type'],
+                    "best_bid": best_bid,
+                    "best_ask": best_ask,
+                    "bid_vol": best_bid_vol,
+                    "ask_vol": best_ask_vol,
+                    "volume": volume
+                })
+            except Exception as e:
+                print(f"⚠️ 資料解析異常 {c.code}: {e}")
+                continue
 
-            effective_leverage = 0.0
-            theta_pct = 0.0 
-            days_left = 0
-            iv_display = 0.0
-            
-            if mother_price > 0 and strike > 0:
-                try:
-                    m_date = datetime.datetime.strptime(maturity_date_str, "%Y-%m-%d").date()
-                    days_left = (m_date - datetime.date.today()).days
-                    
-                    if days_left < STRATEGY_CONFIG["MIN_DAYS_LEFT"]: continue
-                    
-                    if days_left > 0:
-                        T = days_left / 365.0
-                        r_rate = 0.016 
-                        
-                        # 1. 將市價還原為「1單位 Option」的價格
-                        opt_price_per_share = market_price / multiplier if multiplier > 0 else market_price
-                        
-                        # 2. 計算隱含波動率 (IV)
-                        iv = FinancialEngine.implied_volatility(opt_price_per_share, mother_price, strike, T, r_rate, w_type)
-                        
-                        if not np.isnan(iv):
-                            # 3. 使用數值法計算 Greeks (使用 1/252 步長)
-                            delta_unit, theta_unit_dollar = FinancialEngine.calculate_greeks_numerical(
-                                mother_price, strike, T, r_rate, iv, w_type
-                            )
-                            
-                            # 4. 將 Greeks 轉換回這檔權證的規格
-                            
-                            # 實質槓桿 = (標的股價 * Delta * 行使比例) / 權證價格
-                            effective_leverage = (mother_price * abs(delta_unit) * multiplier) / market_price
-                            
-                            if effective_leverage < STRATEGY_CONFIG["MIN_LEVERAGE"] or effective_leverage > STRATEGY_CONFIG["MAX_LEVERAGE"]:
-                                continue
+    if not valid_candidates:
+        print("   ⚠️ 基礎篩選後無符合資料")
+        return []
 
-                            # 權證每日利息(元) = 單單位 Theta * 行使比例
-                            warrant_theta_dollar = theta_unit_dollar * multiplier
-                            
-                            # 計算 Theta % (每日流失百分比)
-                            calc_base = best_bid if best_bid > 0 else market_price
-                            if calc_base > 0:
-                                theta_pct = (abs(warrant_theta_dollar) / calc_base) * 100
-                            
-                            if abs(theta_pct) > STRATEGY_CONFIG["MAX_THETA_PCT"]:
-                                continue
-                            
-                            iv_display = round(iv * 100, 1)
-                            
-                            broker_name = "其他"
-                            for b in KNOWN_BROKERS:
-                                if b in c.name:
-                                    broker_name = b
-                                    break
-                            
-                            valid_results.append({
-                                "id": c.code,
-                                "name": c.name,
-                                "price": round(float(market_price), 2),
-                                "bid": round(float(best_bid), 2),
-                                "ask": round(float(best_ask), 2),
-                                "spread": round(best_ask - best_bid, 2) if (best_ask>0 and best_bid>0) else 0, 
-                                "bid_vol": int(best_bid_vol), 
-                                "ask_vol": int(best_ask_vol), 
-                                "volume": int(volume),
-                                "lev": round(effective_leverage, 2),
-                                "theta_pct": round(theta_pct, 3), 
-                                "days": days_left,
-                                "strike": strike,
-                                "iv": iv_display,
-                                "broker": broker_name,
-                            })
-                except Exception as e:
-                    pass
+    # --- 階段二：向量化運算 (Vectorized Greeks) ---
+    
+    # 準備 Numpy 陣列
+    count = len(valid_candidates)
+    S_arr = np.full(count, mother_price)
+    K_arr = np.array([x['strike'] for x in valid_candidates])
+    T_arr = np.array([x['days_left'] for x in valid_candidates]) / 365.0
+    Price_arr = np.array([x['market_price'] for x in valid_candidates])
+    Mul_arr = np.array([x['multiplier'] for x in valid_candidates])
+    Type_arr = np.array([x['type'] for x in valid_candidates])
+    
+    # 計算 Unit Price (單單位價格)
+    Unit_Price_arr = np.where(Mul_arr > 0, Price_arr / Mul_arr, Price_arr)
+    
+    # 1. 計算隱含波動率 (IV)
+    r_rate = 0.016
+    IV_list = []
+    
+    for i in range(count):
+        iv = VectorizedEngine.implied_volatility_scalar(
+            Unit_Price_arr[i], S_arr[i], K_arr[i], T_arr[i], r_rate, Type_arr[i]
+        )
+        IV_list.append(iv)
+    
+    IV_arr = np.array(IV_list)
+    
+    valid_mask = ~np.isnan(IV_arr)
+    
+    # 2. 向量化 Greeks 計算 (一次算完所有！)
+    deltas, thetas_annual = VectorizedEngine.calculate_greeks_analytical_batch(
+        S_arr, K_arr, T_arr, r_rate, IV_arr, Type_arr
+    )
+    
+    # 3. 後處理與最後篩選
+    final_results = []
+    for i in range(count):
+        if not valid_mask[i]: continue # 跳過 IV 算不出來的
+        
+        # 實質槓桿 = (標的股價 * Delta * 行使比例) / 權證價格
+        lev = (S_arr[i] * abs(deltas[i]) * Mul_arr[i]) / Price_arr[i]
+        
+        # 每日 Theta ($) = 年化 Theta / 252 * 行使比例
+        theta_dollar_day = (thetas_annual[i] / 252.0) * Mul_arr[i]
+        
+        # Theta %
+        calc_base = valid_candidates[i]['best_bid'] if valid_candidates[i]['best_bid'] > 0 else Price_arr[i]
+        theta_pct = (abs(theta_dollar_day) / calc_base) * 100 if calc_base > 0 else 999
+        
+        # 策略過濾
+        if lev < STRATEGY_CONFIG["MIN_LEVERAGE"] or lev > STRATEGY_CONFIG["MAX_LEVERAGE"]: continue
+        if abs(theta_pct) > STRATEGY_CONFIG["MAX_THETA_PCT"]: continue
+        
+        # 整理輸出格式
+        c_info = valid_candidates[i]
+        contract = c_info['contract']
+        
+        # 判斷券商
+        broker_name = "其他"
+        for b in KNOWN_BROKERS:
+            if b in contract.name:
+                broker_name = b
+                break
+        
+        final_results.append({
+            "id": contract.code,
+            "name": contract.name,
+            "price": round(float(c_info['market_price']), 2),
+            "bid": round(float(c_info['best_bid']), 2),
+            "ask": round(float(c_info['best_ask']), 2),
+            "spread": round(c_info['best_ask'] - c_info['best_bid'], 2) if (c_info['best_ask']>0 and c_info['best_bid']>0) else 0,
+            "bid_vol": c_info['bid_vol'],
+            "ask_vol": c_info['ask_vol'],
+            "volume": c_info['volume'],
+            "lev": round(float(lev), 2),
+            "theta_pct": round(float(theta_pct), 3),
+            "days": int(c_info['days_left']),
+            "strike": float(c_info['strike']),
+            "iv": round(float(IV_arr[i] * 100), 1),
+            "broker": broker_name,
+        })
 
-    valid_results.sort(key=lambda x: x['volume'], reverse=True)
+    # 排序 (成交量大優先)
+    final_results.sort(key=lambda x: x['volume'], reverse=True)
 
-    if valid_results:
-        print(f"   ✅ 計算完成！找到 {len(valid_results)} 檔符合策略的權證")
-    else:
-        print("   ⚠️ 篩選後無符合資料")
-
-    return valid_results
+    print(f"   ✅ 計算完成！找到 {len(final_results)} 檔優質權證")
+    return final_results
 
 # ==========================================
 # 5. Firebase 監聽邏輯
@@ -425,13 +449,14 @@ def on_snapshot(col_snapshot, changes, read_time):
                 if query_text:
                     results = process_search(str(query_text))
                     
+                    # 確保數據類型相容於 Firebase
                     clean_results = []
                     for item in results:
                         clean_item = {}
                         for k, v in item.items():
                             if isinstance(v, (np.integer, np.int64)):
                                 clean_item[k] = int(v)
-                            elif isinstance(v, (np.floating, np.float64)):
+                            elif isinstance(v, (np.floating, np.float64, np.float32)):
                                 clean_item[k] = float(v)
                             else:
                                 clean_item[k] = v
@@ -444,13 +469,13 @@ def on_snapshot(col_snapshot, changes, read_time):
                             "count": len(clean_results),
                             "data": clean_results
                         })
-                        print(f"   ☁️ 成功！資料已直接回傳給 App (Doc ID: {doc.id})")
+                        print(f"   ☁️ 成功！資料已回傳 (Doc ID: {doc.id})")
                     except Exception as e:
                         print(f"   ❌ 上傳失敗: {e}")
 
 def start_server():
     build_contract_index()
-    print(f"📡 伺服器啟動成功！正在監聽 Firebase 指令...")
+    print(f"📡 伺服器啟動成功！(API Key模式)")
     print(f"   (請保持此視窗開啟，電腦會自動處理 App 的請求)")
     
     if db:

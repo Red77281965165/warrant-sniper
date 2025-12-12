@@ -9,7 +9,6 @@ interface LoginScreenProps {
 const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [showCursor, setShowCursor] = useState(true);
 
@@ -63,50 +62,45 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
     e.preventDefault();
     if (isLocked || !password) return;
     
-    setIsChecking(true);
     setError(false);
     
-    // Simulate system processing time for effect
-    setTimeout(() => {
-      const isValid = onValidate(password);
+    // Immediate validation - No simulation delay
+    const isValid = onValidate(password);
+    
+    if (!isValid) {
+      const newAttempts = failedAttempts + 1;
+      setFailedAttempts(newAttempts);
+      localStorage.setItem('warrant_login_attempts', newAttempts.toString());
       
-      if (!isValid) {
-        const newAttempts = failedAttempts + 1;
-        setFailedAttempts(newAttempts);
-        localStorage.setItem('warrant_login_attempts', newAttempts.toString());
-        
-        // Lockout Logic
-        if (newAttempts >= 3) {
-          const lockTime = Date.now() + 300 * 1000; // 300 seconds
-          setLockoutUntil(lockTime);
-          localStorage.setItem('warrant_lockout_until', lockTime.toString());
-          setError(true); // Flag error to ensure UI updates if needed, though Locked UI takes precedence
-        } else {
-          setError(true);
-        }
-
-        setIsChecking(false);
-        setPassword('');
-        
-        // Haptic feedback for mobile
-        if (typeof navigator !== 'undefined' && navigator.vibrate) {
-          navigator.vibrate([50, 50, 50, 50, 50]);
-        }
+      // Lockout Logic
+      if (newAttempts >= 3) {
+        const lockTime = Date.now() + 300 * 1000; // 300 seconds
+        setLockoutUntil(lockTime);
+        localStorage.setItem('warrant_lockout_until', lockTime.toString());
+        setError(true); 
       } else {
-        // Success: Clear security counters
-        localStorage.removeItem('warrant_login_attempts');
-        localStorage.removeItem('warrant_lockout_until');
-        
-        // Show Success UI
-        setIsChecking(false);
-        setIsSuccess(true);
-        
-        // Delay calling onSuccess to allow user to see the Checkmark
-        setTimeout(() => {
-          onSuccess();
-        }, 1200);
+        setError(true);
       }
-    }, 800);
+
+      setPassword('');
+      
+      // Haptic feedback for mobile
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([50, 50, 50, 50, 50]);
+      }
+    } else {
+      // Success: Clear security counters
+      localStorage.removeItem('warrant_login_attempts');
+      localStorage.removeItem('warrant_lockout_until');
+      
+      // Show Success UI
+      setIsSuccess(true);
+      
+      // Short delay for visual transition only
+      setTimeout(() => {
+        onSuccess();
+      }, 1000);
+    }
   };
 
   return (
@@ -139,8 +133,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
                 <Lock size={48} className="text-red-500 animate-pulse" />
               ) : error ? (
                 <ShieldAlert size={48} className="text-red-500 animate-[shake_0.5s_ease-in-out]" />
-              ) : isChecking ? (
-                <Activity size={48} className="text-red-500 animate-pulse" />
               ) : (
                 <Crosshair size={48} className="text-red-600 animate-[spin_10s_linear_infinite]" />
               )}
@@ -225,7 +217,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
                           setPassword(e.target.value);
                         }
                       }}
-                      disabled={isChecking || isSuccess}
+                      disabled={isSuccess}
                       className="w-full bg-transparent text-red-500 font-bold text-xl py-4 focus:outline-none placeholder:text-red-900/30 tracking-widest text-center"
                       placeholder="請輸入通行證"
                       autoFocus
@@ -260,28 +252,17 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
            {!isSuccess && (
             <button
                 type="submit"
-                disabled={(!password && !isLocked) || isChecking || isLocked}
+                disabled={(!password && !isLocked) || isLocked}
                 className={`w-full mt-6 py-4 flex items-center justify-center gap-2 font-black tracking-widest text-sm transition-all duration-300 relative overflow-hidden ${
                     isLocked
                         ? 'bg-[#111] text-red-900/30 border border-red-900/10 cursor-not-allowed'
                         : !password 
                             ? 'bg-[#111] text-zinc-600 cursor-not-allowed border border-zinc-800' 
-                            : isChecking 
-                            ? 'bg-red-900/20 text-red-400 border border-red-800 cursor-wait'
                             : 'bg-red-600 text-black hover:bg-red-500 hover:shadow-[0_0_20px_rgba(220,38,38,0.6)] border border-red-500'
                 }`}
             >
                 {isLocked ? (
                     <span>系統冷卻中</span>
-                ) : isChecking ? (
-                    <>
-                        <span className="animate-pulse">身份驗證中...</span>
-                        <span className="flex gap-1">
-                        <span className="w-1 h-1 bg-red-400 rounded-full animate-[bounce_1s_infinite_0ms]"></span>
-                        <span className="w-1 h-1 bg-red-400 rounded-full animate-[bounce_1s_infinite_200ms]"></span>
-                        <span className="w-1 h-1 bg-red-400 rounded-full animate-[bounce_1s_infinite_400ms]"></span>
-                        </span>
-                    </>
                 ) : (
                     <>
                         <span>解除系統鎖定</span>
