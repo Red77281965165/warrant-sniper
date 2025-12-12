@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle, RefreshCw, Info, ShieldAlert } from 'lucide-react';
+import { Search, X, Star, Loader2, Target, Crosshair, BarChart3, Clock, Zap, Shield, Radar, AlertCircle, RefreshCw, Info, ShieldAlert, WifiOff } from 'lucide-react';
 import WarrantRow from './components/WarrantRow';
 import WarrantModal from './components/WarrantModal';
 import LoginScreen from './components/LoginScreen';
@@ -19,6 +19,10 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState(''); 
   const [currentTarget, setCurrentTarget] = useState(''); 
   const [isSearching, setIsSearching] = useState(false);
+  
+  // Timeout State
+  const [isTimeout, setIsTimeout] = useState(false);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Interaction State for Button
   const [isButtonFlashing, setIsButtonFlashing] = useState(false);
@@ -117,6 +121,13 @@ const App: React.FC = () => {
     localStorage.setItem('warrant_favorites_v2', JSON.stringify(savedWarrants));
   }, [savedWarrants]);
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, []);
+
   // Auth Handlers
   const validatePassword = (password: string) => {
     return password === '0616';
@@ -139,8 +150,23 @@ const App: React.FC = () => {
     setLastUpdatedTime(new Date());
 
     setIsSearching(true);
+    setIsTimeout(false);
     setWarrants([]);
     setCurrentTarget(searchQuery);
+
+    // Clear any existing timeout
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    // Set 5-second timeout
+    searchTimeoutRef.current = setTimeout(() => {
+        setIsSearching(false);
+        setIsTimeout(true);
+        // Cancel subscription if it takes too long
+        if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+        }
+    }, 5000);
 
     try {
       if (unsubscribeRef.current) unsubscribeRef.current();
@@ -148,6 +174,10 @@ const App: React.FC = () => {
       const commandId = await sendSearchCommand(searchQuery);
       
       unsubscribeRef.current = subscribeToSearchCommand(commandId, (data, updatedAt, isComplete) => {
+        // Data received, clear timeout
+        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+        setIsTimeout(false);
+
         setWarrants(data);
         if (isComplete) setIsSearching(false);
       });
@@ -155,6 +185,8 @@ const App: React.FC = () => {
     } catch (error) {
       console.error(error);
       setIsSearching(false);
+      // Also clear timeout on error
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     }
   };
 
@@ -169,6 +201,10 @@ const App: React.FC = () => {
     if (isCooldown) return;
     setIsCooldown(true);
     setTimeout(() => setIsCooldown(false), 500);
+
+    // Clear timeout if manual refresh/reset is triggered
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    setIsTimeout(false);
 
     // 2. Otherwise, perform a full soft reset (Home/Clear)
     if (unsubscribeRef.current) {
@@ -455,6 +491,37 @@ const App: React.FC = () => {
                <div className="flex flex-col items-center gap-3">
                   <Loader2 className={`animate-spin ${theme.primary}`} size={32} />
                   <p className="text-sm font-mono text-slate-500">掃描市場數據中...</p>
+               </div>
+            ) : isTimeout ? (
+               <div className="flex flex-col items-center justify-center py-8 animate-in fade-in zoom-in duration-300">
+                   <div className="relative mb-6">
+                       <div className="absolute inset-0 bg-red-500/10 blur-2xl rounded-full"></div>
+                       <div className="relative p-6 bg-[#111] rounded-full border border-red-900/30 shadow-[0_0_15px_rgba(220,38,38,0.2)]">
+                           <WifiOff className="text-red-500" size={48} />
+                       </div>
+                   </div>
+                   
+                   <h3 className="text-xl font-black text-red-500 tracking-[0.2em] mb-3 uppercase drop-shadow-lg">
+                       連線逾時
+                   </h3>
+                   
+                   <p className="text-xs text-slate-500 font-bold tracking-wide text-center max-w-[200px] mb-6">
+                       伺服器回應時間過長，請稍後再嘗試。
+                   </p>
+
+                   <button 
+                       onClick={() => handleSearch()}
+                       className="px-6 py-2.5 rounded-full border border-red-900/40 text-red-500 hover:bg-red-900/10 transition-all text-xs font-bold tracking-widest flex items-center gap-2 group"
+                   >
+                       <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                       重新連線
+                   </button>
+                   
+                   <div className="mt-8 px-4 py-3 bg-red-950/30 border border-red-500/30 rounded-lg max-w-[280px] shadow-[0_0_15px_rgba(220,38,38,0.1)]">
+                      <p className="text-[11px] text-red-300 font-bold text-center leading-relaxed tracking-wide">
+                        也有可能開發者睡過頭，忘記開啟程式碼，請立刻打電話叫開發者起床Zzz....。
+                      </p>
+                   </div>
                </div>
             ) : showFavoritesOnly ? (
                <div className="flex flex-col items-center gap-3">
