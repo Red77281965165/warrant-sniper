@@ -616,7 +616,7 @@ const App: React.FC = () => {
                     <div className="space-y-3">
                         <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
                             <span className="text-slate-400 text-sm font-medium">排除券商</span>
-                            <span className="text-red-400 font-mono font-bold text-sm">統一</span>
+                            <span className="text-white font-mono font-bold text-sm">統一</span>
                         </div>
                         <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
                             <span className="text-slate-400 text-sm font-medium">剩餘天數</span>
