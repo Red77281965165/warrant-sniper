@@ -24,7 +24,7 @@ SJ_API_KEY = "4QXJ3FiGFtzR5WvXtf9Tt41xg6dog6VfhZ5qZy6fiMiy"
 SJ_SECRET_KEY = "EHdBKPXyC2h3gpJmHr9UbYtsqup7aREAyn1sLDnb3mCK"
 
 # ==========================================
-# 策略篩選設定 (已移除 MIN_BID_VOL)
+# 策略篩選設定
 # ==========================================
 STRATEGY_CONFIG = {
     "EXCLUDE_BROKER": "統一",  # 排除的券商關鍵字
@@ -45,7 +45,7 @@ KNOWN_BROKERS = [
     "國票", "永昌", "亞東"
 ]
 
-print("⚡ 正在啟動權證戰情室 (v2025.12 向量光速版 - 無掛單限制)...")
+print("⚡ 正在啟動權證戰情室 (v2025.12 向量光速版 - 修正 Indexs 拼字)...")
 
 # ==========================================
 # 1. 初始化與 CSV 資料載入
@@ -172,17 +172,14 @@ class VectorizedEngine:
         cdf_d1 = norm.cdf(d1)
         cdf_minus_d1 = norm.cdf(-d1)
         cdf_minus_d2 = norm.cdf(-d2)
-        cdf_d2 = norm.cdf(d2) # 用於 Call Theta
+        cdf_d2 = norm.cdf(d2) 
         
         # --- Delta 計算 ---
-        # Call Delta = N(d1), Put Delta = N(d1) - 1
         delta_calls = cdf_d1
         delta_puts = cdf_d1 - 1.0
         deltas = np.where(types_arr == 'call', delta_calls, delta_puts)
         
         # --- Theta 計算 (解析解) ---
-        # 這是年化 Theta (Annual Theta)，稍後需要除以 252 或 365 換算成日
-        # 通用項
         term1 = -(S_arr * sigma_arr * pdf_d1) / (2 * np.sqrt(T_arr))
         
         theta_calls = term1 - r * K_arr * np.exp(-r * T_arr) * cdf_d2
@@ -213,7 +210,7 @@ def build_contract_index():
     print(f"🗺️ 索引完成！含 {len(ALL_WARRANTS)} 檔有效權證。")
 
 # ==========================================
-# 4. 搜尋與運算主邏輯 (優化版)
+# 4. 搜尋與運算主邏輯 (修正 Indexs 拼字)
 # ==========================================
 def process_search(query_text):
     print(f"\n🔔 [Firebase] 收到搜尋請求：{query_text}")
@@ -223,7 +220,13 @@ def process_search(query_text):
     mother_name = query_str
     mother_code = None
 
-    if query_str in STOCK_CODE_TO_NAME:
+    # === 大盤 (001) 特判邏輯 ===
+    if query_str in ["001", "大盤", "臺股指", "台股指", "加權指數"]:
+        print("   🔍 識別為大盤指數搜尋！")
+        mother_code = "001"
+        mother_name = "臺股指"
+    # =========================
+    elif query_str in STOCK_CODE_TO_NAME:
         mother_code = query_str
         mother_name = STOCK_CODE_TO_NAME[query_str]
     elif query_str in STOCK_NAME_TO_CODE:
@@ -242,8 +245,16 @@ def process_search(query_text):
 
     print(f"   🔍 正在抓取標的 ({mother_name}) 即時報價...")
     mother_price = 0.0
+    
     try:
-        m_contract = api.Contracts.Stocks.TSE.get(mother_code) or api.Contracts.Stocks.OTC.get(mother_code)
+        # === 修正點：使用 Indexs (Shioaji 特殊拼法) ===
+        if mother_code == "001":
+            # 注意：這裡是 Indexs，不是 Indices
+            m_contract = api.Contracts.Indexs.TSE.get("001")
+        else:
+            # 一般個股
+            m_contract = api.Contracts.Stocks.TSE.get(mother_code) or api.Contracts.Stocks.OTC.get(mother_code)
+        
         if m_contract:
             s = api.snapshots([m_contract])
             if s: 
@@ -256,9 +267,13 @@ def process_search(query_text):
         print("   ⚠️ 標的無價格，無法計算。")
         return []
 
-    search_name = mother_name.replace("-KY", "").replace("KY", "").replace("*", "")
-    search_name = search_name.replace("投控", "").replace("控股", "").replace("-DR", "")
-    search_name = search_name.strip()
+    # 設定搜尋關鍵字
+    if mother_code == "001":
+        search_name = "臺股指"
+    else:
+        search_name = mother_name.replace("-KY", "").replace("KY", "").replace("*", "")
+        search_name = search_name.replace("投控", "").replace("控股", "").replace("-DR", "")
+        search_name = search_name.strip()
 
     target_warrants = []
     for w in ALL_WARRANTS:
@@ -313,9 +328,8 @@ def process_search(query_text):
                 elif best_bid > 0: market_price = best_bid
                 else: continue
                 
-                # 3. 量能過濾 (只保留總量篩選，移除買一量篩選)
+                # 3. 量能過濾
                 if volume < STRATEGY_CONFIG["MIN_VOLUME"]: continue
-                # if best_bid_vol < STRATEGY_CONFIG["MIN_BID_VOL"]: continue # <-- 已移除
 
                 if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
 
@@ -326,7 +340,7 @@ def process_search(query_text):
                 
                 if days_left < STRATEGY_CONFIG["MIN_DAYS_LEFT"]: continue
                 
-                # 收集有效數據到列表
+                # 收集有效數據
                 valid_candidates.append({
                     "contract": c,
                     "market_price": market_price,
@@ -341,7 +355,6 @@ def process_search(query_text):
                     "volume": volume
                 })
             except Exception as e:
-                print(f"⚠️ 資料解析異常 {c.code}: {e}")
                 continue
 
     if not valid_candidates:
@@ -350,7 +363,6 @@ def process_search(query_text):
 
     # --- 階段二：向量化運算 (Vectorized Greeks) ---
     
-    # 準備 Numpy 陣列
     count = len(valid_candidates)
     S_arr = np.full(count, mother_price)
     K_arr = np.array([x['strike'] for x in valid_candidates])
@@ -359,7 +371,6 @@ def process_search(query_text):
     Mul_arr = np.array([x['multiplier'] for x in valid_candidates])
     Type_arr = np.array([x['type'] for x in valid_candidates])
     
-    # 計算 Unit Price (單單位價格)
     Unit_Price_arr = np.where(Mul_arr > 0, Price_arr / Mul_arr, Price_arr)
     
     # 1. 計算隱含波動率 (IV)
@@ -376,7 +387,7 @@ def process_search(query_text):
     
     valid_mask = ~np.isnan(IV_arr)
     
-    # 2. 向量化 Greeks 計算 (一次算完所有！)
+    # 2. 向量化 Greeks 計算
     deltas, thetas_annual = VectorizedEngine.calculate_greeks_analytical_batch(
         S_arr, K_arr, T_arr, r_rate, IV_arr, Type_arr
     )
@@ -384,27 +395,20 @@ def process_search(query_text):
     # 3. 後處理與最後篩選
     final_results = []
     for i in range(count):
-        if not valid_mask[i]: continue # 跳過 IV 算不出來的
+        if not valid_mask[i]: continue 
         
-        # 實質槓桿 = (標的股價 * Delta * 行使比例) / 權證價格
         lev = (S_arr[i] * abs(deltas[i]) * Mul_arr[i]) / Price_arr[i]
-        
-        # 每日 Theta ($) = 年化 Theta / 252 * 行使比例
         theta_dollar_day = (thetas_annual[i] / 252.0) * Mul_arr[i]
         
-        # Theta %
         calc_base = valid_candidates[i]['best_bid'] if valid_candidates[i]['best_bid'] > 0 else Price_arr[i]
         theta_pct = (abs(theta_dollar_day) / calc_base) * 100 if calc_base > 0 else 999
         
-        # 策略過濾
         if lev < STRATEGY_CONFIG["MIN_LEVERAGE"] or lev > STRATEGY_CONFIG["MAX_LEVERAGE"]: continue
         if abs(theta_pct) > STRATEGY_CONFIG["MAX_THETA_PCT"]: continue
         
-        # 整理輸出格式
         c_info = valid_candidates[i]
         contract = c_info['contract']
         
-        # 判斷券商
         broker_name = "其他"
         for b in KNOWN_BROKERS:
             if b in contract.name:
@@ -429,7 +433,6 @@ def process_search(query_text):
             "broker": broker_name,
         })
 
-    # 排序 (成交量大優先)
     final_results.sort(key=lambda x: x['volume'], reverse=True)
 
     print(f"   ✅ 計算完成！找到 {len(final_results)} 檔優質權證")
@@ -449,7 +452,6 @@ def on_snapshot(col_snapshot, changes, read_time):
                 if query_text:
                     results = process_search(str(query_text))
                     
-                    # 確保數據類型相容於 Firebase
                     clean_results = []
                     for item in results:
                         clean_item = {}
