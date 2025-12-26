@@ -32,7 +32,7 @@ STRATEGY_CONFIG = {
     "MIN_LEVERAGE": 2.5,       # 最小實質槓桿
     "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
     "MAX_THETA_PCT": 2.5,      # 最大每日利息% (絕對值)
-    "MIN_VOLUME": 10,          # 最小總成交量
+    "MIN_VOLUME": 0,          # 最小總成交量
     "MIN_PRICE": 0.25,         # 最低價
     "MAX_PRICE": 3.0,          # 最高價
     "MAX_SPREAD": 0.03         # 最大容許買賣價差
@@ -221,7 +221,7 @@ def process_search(query_text):
     mother_code = None
 
     # === 大盤 (001) 特判邏輯 ===
-    if query_str in ["001", "大盤", "臺股指", "台股指", "加權指數"]:
+    if query_str in ["001", "大盤", "臺股指", "台股指", "加權指數", "加權", "加權指", "台股", "臺股", "TAIEX"]:
         print("   🔍 識別為大盤指數搜尋！")
         mother_code = "001"
         mother_name = "臺股指"

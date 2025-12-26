@@ -273,8 +273,8 @@ const App: React.FC = () => {
         // 4. 每日最大利息: 2.5% (Absolute value)
         if (Math.abs(w.thetaPercent) > 2.5) return false;
 
-        // 5. 最小成交量: 10張
-        if (w.volume < 10) return false;
+        // 5. 最小成交量: 0張 (Updated from 10)
+        if (w.volume < 0) return false;
 
         // 6. 價格上下限: 0.25元 ~ 3.0元
         if (w.price < 0.25 || w.price > 3.0) return false;
@@ -632,7 +632,7 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
                             <span className="text-slate-400 text-sm font-medium">成交總量</span>
-                            <span className="text-slate-200 font-mono font-bold text-sm">≥ 10 張</span>
+                            <span className="text-slate-200 font-mono font-bold text-sm">≥ 0 張</span>
                         </div>
                         <div className="flex justify-between items-center py-1 border-b border-slate-900/50">
                             <span className="text-slate-400 text-sm font-medium">價格區間</span>
