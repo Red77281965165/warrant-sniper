@@ -280,11 +280,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onValidate, onSuccess }) => {
               安全連線已建立<span className={`${showCursor ? 'opacity-100' : 'opacity-0'}`}>_</span>
            </p>
 
-           <div className="border-t border-red-900/10 pt-4 mx-auto max-w-[280px]">
-               <p className="text-[10px] text-zinc-600 leading-relaxed font-medium mb-2">
-                  <span className="text-red-900">免責聲明:</span> 後臺已搬往雲端伺服器，速度稍慢是正常現象，但槓桿、利息、天數皆在0.2個百分點誤差內，請放心使用，如有修改建議請聯繫開發者，也請使用者謹慎下單，出事了開發者決不負責。
+           <div className="px-4 py-3 border border-red-900/50 rounded-lg mx-auto max-w-[300px] shadow-[0_0_15px_rgba(220,38,38,0.05)]">
+               <p className="text-[10px] text-white leading-relaxed font-bold mb-2 text-center">
+                  <span className="text-red-500">免責聲明:</span> 後臺已搬往雲端伺服器，速度稍慢是正常現象，但槓桿、利息、天數皆在0.2個百分點誤差內，請放心使用，如有修改建議請聯繫開發者，也請使用者謹慎下單，出事了開發者決不負責。
                </p>
-               <p className="text-[10px] text-zinc-600 leading-relaxed font-medium mt-4">
+               <p className="text-[10px] text-zinc-500 leading-relaxed font-bold mt-4 text-center">
                   如通行證忘記，請聯繫開發者索取通行證
                </p>
            </div>
