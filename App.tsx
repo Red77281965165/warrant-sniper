@@ -157,7 +157,7 @@ const App: React.FC = () => {
     // Clear any existing timeout
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
-    // Set 10-second timeout (Updated from 5s)
+    // Set 15-second timeout (Updated from 10s)
     searchTimeoutRef.current = setTimeout(() => {
         setIsSearching(false);
         setIsTimeout(true);
@@ -166,7 +166,7 @@ const App: React.FC = () => {
             unsubscribeRef.current();
             unsubscribeRef.current = null;
         }
-    }, 10000);
+    }, 15000);
 
     try {
       if (unsubscribeRef.current) unsubscribeRef.current();
@@ -273,7 +273,7 @@ const App: React.FC = () => {
         // 4. 每日最大利息: 2.5% (Absolute value)
         if (Math.abs(w.thetaPercent) > 2.5) return false;
 
-        // 5. 最小成交量: 0張 (Updated from 10)
+        // 5. 最小成交量: 0張
         if (w.volume < 0) return false;
 
         // 6. 價格上下限: 0.25元 ~ 3.0元

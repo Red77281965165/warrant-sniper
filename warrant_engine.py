@@ -221,7 +221,7 @@ def process_search(query_text):
     mother_code = None
 
     # === 大盤 (001) 特判邏輯 ===
-    if query_str in ["001", "大盤", "臺股指", "台股指", "加權指數", "加權", "加權指", "台股", "臺股", "TAIEX"]:
+    if query_str in ["001", "大盤", "臺股指", "台股指", "加權指數", "加權", "加權指", "台股", "臺股", "TAIEX","臺指","台指"]:
         print("   🔍 識別為大盤指數搜尋！")
         mother_code = "001"
         mother_name = "臺股指"
