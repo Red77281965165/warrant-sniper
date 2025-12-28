@@ -157,7 +157,7 @@ const App: React.FC = () => {
     // Clear any existing timeout
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
-    // Set 5-second timeout
+    // Set 10-second timeout (Updated from 5s)
     searchTimeoutRef.current = setTimeout(() => {
         setIsSearching(false);
         setIsTimeout(true);
@@ -166,7 +166,7 @@ const App: React.FC = () => {
             unsubscribeRef.current();
             unsubscribeRef.current = null;
         }
-    }, 5000);
+    }, 10000);
 
     try {
       if (unsubscribeRef.current) unsubscribeRef.current();
