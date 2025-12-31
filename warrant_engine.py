@@ -19,7 +19,7 @@ import threading
 CRED_PATH = "serviceAccountKey.json" 
 COMMAND_COLLECTION = "search_commands" 
 
-# 你的永豐金 API 帳號
+# ⚠️ 資安提醒：正式上線建議將 Key 移至環境變數
 SJ_API_KEY = "4QXJ3FiGFtzR5WvXtf9Tt41xg6dog6VfhZ5qZy6fiMiy"
 SJ_SECRET_KEY = "EHdBKPXyC2h3gpJmHr9UbYtsqup7aREAyn1sLDnb3mCK"
 
@@ -28,29 +28,89 @@ SJ_SECRET_KEY = "EHdBKPXyC2h3gpJmHr9UbYtsqup7aREAyn1sLDnb3mCK"
 # ==========================================
 STRATEGY_CONFIG = {
     "EXCLUDE_BROKER": "統一",  # 排除的券商關鍵字
-    "MIN_DAYS_LEFT": 90,       # 最小剩餘天數
-    "MIN_LEVERAGE": 2.5,       # 最小實質槓桿
-    "MAX_LEVERAGE": 9.0,       # 最大實質槓桿
-    "MAX_THETA_PCT": 2.5,      # 最大每日利息% (絕對值)
-    "MIN_VOLUME": 0,          # 最小總成交量
-    "MIN_PRICE": 0.25,         # 最低價
-    "MAX_PRICE": 3.0,          # 最高價
-    "MAX_SPREAD": 0.03         # 最大容許買賣價差
+    "MIN_DAYS_LEFT": 90,       
+    "MIN_LEVERAGE": 2.0,       
+    "MAX_LEVERAGE": 9.0,      
+    "MAX_THETA_PCT": 3.0,      
+    "MIN_VOLUME": 0,           
+    "MIN_PRICE": 0.2,         
+    "MAX_PRICE": 4.0,          
+    "MAX_SPREAD": 0.05         
 }
 
-# 已知券商列表
+# 特殊名稱強制對應表
+CUSTOM_SEARCH_MAPPING = {
+    "0050": "台灣50",     
+    "00715L": "SGBR2X",   
+    "00673R": "元油反",   
+    "00665L": "國企2X",   
+    "00663L": "臺指2X",   
+    "00738U": "道瓊銀",   
+    "0056": "高股息",
+    "00632R": "T50反1",   
+    "00631L": "T50正2",  
+    "00672L": "原油正2", 
+    "00637L": "滬深2X",  
+    "00633L": "上証2X",  
+    "00680L": "美債正2"  
+}
+
 KNOWN_BROKERS = [
     "元大", "凱基", "統一", "永豐", "富邦", "群益", "國泰", "兆豐", 
     "華南", "玉山", "元富", "康和", "第一", "麥證", "法興", "匯豐", 
     "國票", "永昌", "亞東"
 ]
 
-print("⚡ 正在啟動權證戰情室 (v2025.12 向量光速版 - 修正 Indexs 拼字)...")
+print("⚡ 正在啟動權證戰情室 (v2025.12.31 智慧排程版)...")
 
 # ==========================================
-# 1. 初始化與 CSV 資料載入
+# 1. 初始化與全域變數
 # ==========================================
 CACHE_SPECS = {} 
+api = None 
+STOCK_CODE_TO_NAME = {}
+STOCK_NAME_TO_CODE = {}
+ALL_WARRANTS = []
+
+# ==========================================
+# API 管理區 (強化版)
+# ==========================================
+def init_api():
+    """初始化或重啟 Shioaji API (含安全等待機制)"""
+    global api
+    print("🔄 正在執行 API 連線/重連程序...")
+    
+    # 1. 嘗試安全登出舊連線
+    if api:
+        try:
+            api.logout()
+            time.sleep(2) 
+        except Exception:
+            pass
+    
+    try:
+        # 2. 建立新物件
+        api = sj.Shioaji()
+        
+        # 3. 登入
+        api.login(api_key=SJ_API_KEY, secret_key=SJ_SECRET_KEY)
+        
+        print("   ⏳ 等待連線建立 (5秒)...")
+        time.sleep(5) # 關鍵：給系統足夠時間建立 Session
+        
+        # 4. 暖機測試
+        # 隨便抓一檔權值股確認連線活著
+        try:
+            api.snapshots([api.Contracts.Stocks.TSE.get('2330')])
+            print("   🩺 連線健康檢查通過")
+        except:
+            pass
+
+        print("✅ Shioaji API 連線就緒！")
+        return True
+    except Exception as e:
+        print(f"❌ API 連線失敗: {e}")
+        return False
 
 def load_csv_data():
     filename = "warrant_full_data.csv"
@@ -108,31 +168,17 @@ else:
         print(f"❌ Firebase 初始化失敗: {e}")
         db = None
 
-# 初始化 Shioaji
-api = sj.Shioaji()
-try:
-    api.login(api_key=SJ_API_KEY, secret_key=SJ_SECRET_KEY)
-    print("✅ Shioaji 登入成功")
-except Exception as e:
-    print(f"❌ API 登入失敗: {e}")
-    sys.exit(1)
-
-load_csv_data()
-
 # ==========================================
 # 2. 金融工程核心 (向量化極速引擎)
 # ==========================================
 class VectorizedEngine:
     @staticmethod
     def bs_price_scalar(sigma, S, K, T, r, option_type='call'):
-        """單筆計算 BS 價格 (用於反推 IV 的迴圈中)"""
         try:
             if T <= 0: return max(0, S - K) if option_type == 'call' else max(0, K - S)
             if sigma <= 0.0001: return max(0, S - K) if option_type == 'call' else max(0, K - S)
-            
             d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
             d2 = d1 - sigma * np.sqrt(T)
-            
             if option_type == 'call':
                 return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
             else:
@@ -142,90 +188,91 @@ class VectorizedEngine:
 
     @staticmethod
     def implied_volatility_scalar(price, S, K, T, r, option_type='call'):
-        """反推隱含波動率 (Scalar)"""
         try:
             intrinsic = max(0, S - K) if option_type == 'call' else max(0, K - S)
             if price <= intrinsic + 0.001: return np.nan
-            
             def objective(sigma):
                 return VectorizedEngine.bs_price_scalar(sigma, S, K, T, r, option_type) - price
-            
             return brentq(objective, 0.01, 5.0)
         except:
             return np.nan
 
     @staticmethod
     def calculate_greeks_analytical_batch(S_arr, K_arr, T_arr, r, sigma_arr, types_arr):
-        """
-        【核心加速區】使用解析解公式一次計算所有 Greeks
-        包含 Delta, Gamma (未輸出), Theta (年化)
-        """
-        # 避免除以零
         sigma_arr = np.maximum(sigma_arr, 0.0001)
         T_arr = np.maximum(T_arr, 0.00001)
-        
         d1 = (np.log(S_arr / K_arr) + (r + 0.5 * sigma_arr ** 2) * T_arr) / (sigma_arr * np.sqrt(T_arr))
         d2 = d1 - sigma_arr * np.sqrt(T_arr)
-        
-        # 預先計算 PDF 和 CDF
         pdf_d1 = norm.pdf(d1)
         cdf_d1 = norm.cdf(d1)
         cdf_minus_d1 = norm.cdf(-d1)
         cdf_minus_d2 = norm.cdf(-d2)
         cdf_d2 = norm.cdf(d2) 
-        
-        # --- Delta 計算 ---
         delta_calls = cdf_d1
         delta_puts = cdf_d1 - 1.0
         deltas = np.where(types_arr == 'call', delta_calls, delta_puts)
-        
-        # --- Theta 計算 (解析解) ---
         term1 = -(S_arr * sigma_arr * pdf_d1) / (2 * np.sqrt(T_arr))
-        
         theta_calls = term1 - r * K_arr * np.exp(-r * T_arr) * cdf_d2
         theta_puts = term1 + r * K_arr * np.exp(-r * T_arr) * cdf_minus_d2
-        
         thetas_annual = np.where(types_arr == 'call', theta_calls, theta_puts)
-        
         return deltas, thetas_annual
 
 # ==========================================
 # 3. 索引建立
 # ==========================================
-ALL_WARRANTS = [] 
-STOCK_CODE_TO_NAME = {}
-STOCK_NAME_TO_CODE = {}
-
 def build_contract_index():
-    print("📥 建立全市場索引...")
-    tse = list(api.Contracts.Stocks.TSE) if hasattr(api.Contracts.Stocks, 'TSE') else []
-    otc = list(api.Contracts.Stocks.OTC) if hasattr(api.Contracts.Stocks, 'OTC') else []
+    print("📥 建立全市場索引 (含ETF)...")
+    global api
+    global ALL_WARRANTS, STOCK_CODE_TO_NAME, STOCK_NAME_TO_CODE
     
+    # 確保 API 有連線
+    if not api: init_api()
+    
+    # 清空舊資料
+    ALL_WARRANTS = []
+    STOCK_CODE_TO_NAME = {}
+    STOCK_NAME_TO_CODE = {}
+    
+    try:
+        tse = list(api.Contracts.Stocks.TSE) if hasattr(api.Contracts.Stocks, 'TSE') else []
+        otc = list(api.Contracts.Stocks.OTC) if hasattr(api.Contracts.Stocks, 'OTC') else []
+    except:
+        print("⚠️ 索引建立時發生錯誤，嘗試重連 API...")
+        init_api()
+        tse = list(api.Contracts.Stocks.TSE) if hasattr(api.Contracts.Stocks, 'TSE') else []
+        otc = list(api.Contracts.Stocks.OTC) if hasattr(api.Contracts.Stocks, 'OTC') else []
+
     for c in tse + otc:
-        if len(c.code) == 4: 
-            STOCK_CODE_TO_NAME[c.code] = c.name
-            STOCK_NAME_TO_CODE[c.name] = c.code
+        STOCK_CODE_TO_NAME[c.code] = c.name
+        STOCK_NAME_TO_CODE[c.name] = c.code
         if c.code in CACHE_SPECS:
             ALL_WARRANTS.append(c)
     print(f"🗺️ 索引完成！含 {len(ALL_WARRANTS)} 檔有效權證。")
 
 # ==========================================
-# 4. 搜尋與運算主邏輯 (修正 Indexs 拼字)
+# 4. 搜尋與運算主邏輯 (含重試機制)
 # ==========================================
 def process_search(query_text):
+    global api
     print(f"\n🔔 [Firebase] 收到搜尋請求：{query_text}")
     
+    # === 步驟 0: API 健康檢查 ===
+    if not api:
+        print("⚠️ API 尚未連線，嘗試連線中...")
+        if not init_api():
+            print("❌ 無法連線，放棄本次搜尋")
+            return []
+
     query_str = str(query_text).strip().replace("*", "")
     
     mother_name = query_str
     mother_code = None
 
-    # === 大盤 (001) 特判邏輯 ===
-    if query_str in ["001", "大盤", "臺股指", "台股指", "加權指數", "加權", "加權指", "台股", "臺股", "TAIEX","臺指","台指"]:
+    # === 標的代碼識別 ===
+    if query_str in ["001", "大盤", "臺股指", "台股指", "加權"]:
         print("   🔍 識別為大盤指數搜尋！")
         mother_code = "001"
         mother_name = "臺股指"
-    # =========================
     elif query_str in STOCK_CODE_TO_NAME:
         mother_code = query_str
         mother_name = STOCK_CODE_TO_NAME[query_str]
@@ -246,34 +293,72 @@ def process_search(query_text):
     print(f"   🔍 正在抓取標的 ({mother_name}) 即時報價...")
     mother_price = 0.0
     
-    try:
-        # === 修正點：使用 Indexs (Shioaji 特殊拼法) ===
-        if mother_code == "001":
-            # 注意：這裡是 Indexs，不是 Indices
-            m_contract = api.Contracts.Indexs.TSE.get("001")
-        else:
-            # 一般個股
-            m_contract = api.Contracts.Stocks.TSE.get(mother_code) or api.Contracts.Stocks.OTC.get(mother_code)
-        
-        if m_contract:
-            s = api.snapshots([m_contract])
-            if s: 
-                mother_price = float(s[0].close)
-                print(f"   📊 標的價格: {mother_price}")
-    except Exception as e:
-        print(f"   ❌ 標的報價抓取錯誤: {e}")
+    # === 抓取標的報價 (強化重試邏輯) ===
+    retry_count = 0
+    max_retries = 3
+    while retry_count < max_retries:
+        try:
+            if mother_code == "001":
+                m_contract = api.Contracts.Indexs.TSE.get("001")
+            else:
+                m_contract = api.Contracts.Stocks.TSE.get(mother_code)
+                if not m_contract:
+                    m_contract = api.Contracts.Stocks.OTC.get(mother_code)
+            
+            if m_contract:
+                s = api.snapshots([m_contract])
+                if s and len(s) > 0 and s[0].close > 0: 
+                    mother_price = float(s[0].close)
+                    print(f"   📊 標的價格: {mother_price}")
+                    break
+                else:
+                    raise ValueError("Snapshot empty or invalid")
+            else:
+                print(f"   ❌ 找不到合約物件: {mother_code}")
+                break
+                
+        except Exception as e:
+            retry_count += 1
+            print(f"   ⚠️ 標的報價抓取失敗 (嘗試 {retry_count}/{max_retries}): {e}")
+            
+            # 偵測到 Not ready 或 Timeout，執行重連
+            if "Not ready" in str(e) or "102949866" in str(e) or "timeout" in str(e).lower():
+                print("   🔌 偵測到連線問題，執行重連...")
+                init_api() 
+                time.sleep(3)
+            else:
+                time.sleep(2)
 
     if mother_price <= 0:
         print("   ⚠️ 標的無價格，無法計算。")
         return []
 
-    # 設定搜尋關鍵字
-    if mother_code == "001":
+    # =========================================
+    # 搜尋關鍵字邏輯
+    # =========================================
+    search_name = ""
+    is_custom_mapped = False 
+    
+    if mother_code in CUSTOM_SEARCH_MAPPING:
+        search_name = CUSTOM_SEARCH_MAPPING[mother_code]
+        is_custom_mapped = True
+        print(f"   🛡️ 觸發精準對應：{mother_code} -> 強制搜尋「{search_name}」")
+    elif mother_code == "001":
         search_name = "臺股指"
     else:
         search_name = mother_name.replace("-KY", "").replace("KY", "").replace("*", "")
         search_name = search_name.replace("投控", "").replace("控股", "").replace("-DR", "")
+        search_name = search_name.replace("期", "")
+        is_etf = mother_code.startswith("00") or len(mother_code) > 4 or "R" in mother_code or "L" in mother_code
+        if is_etf:
+            etf_issuers = ["元大", "國泰", "富邦", "群益", "街口", "中信", "凱基", "永豐", "台新", "兆豐", "第一", "統一"]
+            for issuer in etf_issuers:
+                search_name = search_name.replace(issuer, "")
+        if "臺" in search_name and search_name != "臺股指":
+            search_name = search_name.replace("臺", "台")
         search_name = search_name.strip()
+
+    print(f"   🕵️ 最終搜尋關鍵字: {search_name}")
 
     target_warrants = []
     for w in ALL_WARRANTS:
@@ -283,24 +368,44 @@ def process_search(query_text):
             target_warrants.append(w)
         
     if not target_warrants:
-        print(f"   ⚠️ 找不到權證 (過濾後: {search_name})")
+        print(f"   ⚠️ 找不到權證 (關鍵字: {search_name})")
+        if not is_custom_mapped and "台灣50" in search_name:
+             fallback = search_name.replace("台灣50", "台50")
+             print(f"   🔄 嘗試備用關鍵字: {fallback}")
+             for w in ALL_WARRANTS:
+                if fallback in w.name and STRATEGY_CONFIG["EXCLUDE_BROKER"] not in w.name:
+                    target_warrants.append(w)
+
+    if not target_warrants:
+        print("   ❌ 真的找不到，請確認該 ETF 是否有發行權證。")
         return []
 
-    print(f"   📋 初步鎖定 {len(target_warrants)} 檔權證，進行光速運算...")
+    print(f"   📋 初步鎖定 {len(target_warrants)} 檔權證，進行運算...")
 
     # --- 階段一：批次抓取與基礎過濾 ---
     valid_candidates = []
-    
-    # 分批抓取 Snapshot
     chunk_size = 200
+    
     for i in range(0, len(target_warrants), chunk_size):
         chunk = target_warrants[i:i+chunk_size]
-        try:
-            snapshots = api.snapshots(chunk)
-        except Exception as e:
-            print(f"⚠️ API Snapshot 錯誤: {e}")
-            continue
         
+        # === 權證報價抓取 (含容錯) ===
+        snapshots = []
+        snap_retry = 0
+        while snap_retry < 3:
+            try:
+                snapshots = api.snapshots(chunk)
+                break
+            except Exception as e:
+                print(f"   ⚠️ 權證報價抓取失敗，重試中... ({e})")
+                if "Not ready" in str(e):
+                    init_api()
+                    time.sleep(3)
+                snap_retry += 1
+                time.sleep(1)
+        
+        if not snapshots: continue # 真的抓不到就跳過這批
+
         snap_map = {s.code: s for s in snapshots}
         
         for c in chunk:
@@ -317,30 +422,24 @@ def process_search(query_text):
                 best_ask_vol = int(snap.sell_volume)
                 volume = int(snap.total_volume)
                 
-                # 1. 價差過濾
                 if best_ask > 0 and best_bid > 0:
                     spread = best_ask - best_bid
                     if spread > STRATEGY_CONFIG["MAX_SPREAD"]: continue
                 
-                # 2. 定義市價
                 if best_ask > 0: market_price = best_ask
                 elif last_price > 0: market_price = last_price
                 elif best_bid > 0: market_price = best_bid
                 else: continue
                 
-                # 3. 量能過濾
                 if volume < STRATEGY_CONFIG["MIN_VOLUME"]: continue
-
                 if market_price < STRATEGY_CONFIG["MIN_PRICE"] or market_price > STRATEGY_CONFIG["MAX_PRICE"]: continue
 
-                # 4. 時間過濾
                 specs = CACHE_SPECS[c.code]
                 m_date = datetime.datetime.strptime(specs['maturity_date'], "%Y-%m-%d").date()
                 days_left = (m_date - datetime.date.today()).days
                 
                 if days_left < STRATEGY_CONFIG["MIN_DAYS_LEFT"]: continue
                 
-                # 收集有效數據
                 valid_candidates.append({
                     "contract": c,
                     "market_price": market_price,
@@ -362,7 +461,6 @@ def process_search(query_text):
         return []
 
     # --- 階段二：向量化運算 (Vectorized Greeks) ---
-    
     count = len(valid_candidates)
     S_arr = np.full(count, mother_price)
     K_arr = np.array([x['strike'] for x in valid_candidates])
@@ -373,7 +471,6 @@ def process_search(query_text):
     
     Unit_Price_arr = np.where(Mul_arr > 0, Price_arr / Mul_arr, Price_arr)
     
-    # 1. 計算隱含波動率 (IV)
     r_rate = 0.016
     IV_list = []
     
@@ -384,15 +481,12 @@ def process_search(query_text):
         IV_list.append(iv)
     
     IV_arr = np.array(IV_list)
-    
     valid_mask = ~np.isnan(IV_arr)
     
-    # 2. 向量化 Greeks 計算
     deltas, thetas_annual = VectorizedEngine.calculate_greeks_analytical_batch(
         S_arr, K_arr, T_arr, r_rate, IV_arr, Type_arr
     )
     
-    # 3. 後處理與最後篩選
     final_results = []
     for i in range(count):
         if not valid_mask[i]: continue 
@@ -439,9 +533,13 @@ def process_search(query_text):
     return final_results
 
 # ==========================================
-# 5. Firebase 監聽邏輯
+# 5. Firebase 監聽與時程控制 (智慧排程核心)
 # ==========================================
 def on_snapshot(col_snapshot, changes, read_time):
+    # 如果 API 沒連線 (代表在休市中)，直接忽略請求，避免報錯
+    if api is None:
+        return
+
     for change in changes:
         if change.type.name == 'ADDED':
             doc = change.document
@@ -475,21 +573,80 @@ def on_snapshot(col_snapshot, changes, read_time):
                     except Exception as e:
                         print(f"   ❌ 上傳失敗: {e}")
 
-def start_server():
-    build_contract_index()
-    print(f"📡 伺服器啟動成功！(API Key模式)")
-    print(f"   (請保持此視窗開啟，電腦會自動處理 App 的請求)")
+def check_market_open():
+    """判斷是否為交易時間 (08:50 ~ 13:45)"""
+    now = datetime.datetime.now()
+    current_time = now.time()
     
-    if db:
-        col_ref = db.collection(COMMAND_COLLECTION)
-        col_watch = col_ref.on_snapshot(on_snapshot)
-        while True:
-            try: time.sleep(1)
-            except KeyboardInterrupt:
-                print("🛑 伺服器停止中...")
-                break
+    start_time = datetime.time(8, 50) 
+    end_time = datetime.time(13, 45)  
+
+    if now.weekday() >= 5: # 週末
+        return False, "週末休市"
+
+    if start_time <= current_time <= end_time:
+        return True, "開盤中"
     else:
+        return False, "非交易時間"
+
+def start_server():
+    # 第一次載入資料
+    load_csv_data()
+    
+    print(f"📡 伺服器啟動成功！(智慧排程模式)")
+    
+    was_open = False 
+
+    if not db:
         print("❌ 無法連接 Firebase，請檢查 Key 設定。")
+        return
+
+    col_ref = db.collection(COMMAND_COLLECTION)
+    col_watch = col_ref.on_snapshot(on_snapshot)
+    
+    print("⏳ 進入排程監控迴圈...")
+
+    while True:
+        try:
+            is_open, status_msg = check_market_open()
+            
+            if is_open:
+                # === 開盤狀態 ===
+                if not was_open:
+                    print(f"\n⏰ 時間到 ({status_msg})！喚醒 API 並更新索引...")
+                    if init_api():
+                        build_contract_index()
+                        was_open = True
+                        print("🚀 戰情室已就緒，開始接受指令！")
+                    else:
+                        print("❌ API 喚醒失敗，稍後重試...")
+                        time.sleep(10)
+                
+                # 開盤中，讓主線程休息，由 on_snapshot 處理工作
+                time.sleep(1) 
+                
+            else:
+                # === 休市狀態 ===
+                if was_open:
+                    print(f"\n💤 收盤了 ({status_msg})。登出 API 進入休眠模式...")
+                    global api
+                    if api:
+                        try: api.logout()
+                        except: pass
+                    api = None # 清空物件，防止誤用
+                    was_open = False
+                
+                # 顯示休眠訊息 (每分鐘一次)
+                sys.stdout.write(f"\r💤 休眠中... 現在時間 {datetime.datetime.now().strftime('%H:%M:%S')} (非交易時段)   ")
+                sys.stdout.flush()
+                time.sleep(60)
+
+        except KeyboardInterrupt:
+            print("\n🛑 伺服器停止中...")
+            break
+        except Exception as e:
+            print(f"\n❌ 主迴圈錯誤: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     start_server()
